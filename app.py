@@ -12,22 +12,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-# Firebaseの初期化
-if not firebase_admin._apps:
-    # {{ edit_1 }}: 環境変数からFirebaseの認証情報のパスを取得
-    cred = credentials.Certificate(os.getenv('FIREBASE_CREDENTIALS_PATH'))
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
-
-# システムプロンプトの定義
-SYSTEM_PROMPT = (
-    "あなたはプロのエンジニアでありプログラマーです。"
-    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
-    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
-    "チャットでは日本語で応対してください。"
-    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
-)
+import json
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -43,6 +28,25 @@ def reload_env():
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
+
+# 起動時に.envファイルを読み込む
+reload_env()
+
+# Firebaseの初期化
+if not firebase_admin._apps:
+    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    cred = credentials.Certificate(firebase_credentials)
+    firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+# システムプロンプトの定義
+SYSTEM_PROMPT = (
+    "あなたはプロのエンジニアでありプログラマーです。"
+    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
+    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
+    "チャットでは日本語で応対してください。"
+    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
+)
 
 # スクレイピングと要約の関数
 def scrape_and_summarize(url):
@@ -116,7 +120,7 @@ if "html_content" not in st.session_state:
 # メインコンテナの設定
 main = st.container()
 
-# モデル選択のプルダウン
+# モデル選択のルダウン
 model_choice = st.selectbox(
     "モデルを選択してください",
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
@@ -187,24 +191,20 @@ if prompt := st.chat_input():
                 max_tokens=10
             )
             summary_title = summary_response.choices[0].message.content.strip()
-            
-            db.collection('chat_history').add({
-                'messages': latest_conversation,
-                'summary_title': summary_title,
-                'timestamp': firestore.SERVER_TIMESTAMP
-            })
 
-            # HTMLコンテンツの抽出
-            html_start = full_response.find("<html")
-            if html_start != -1:
-                html_end = full_response.rfind("</html>") + 7
-                st.session_state.html_content = full_response[html_start:html_end]
-                text_content = full_response[:html_start] + full_response[html_end:]
-                message_placeholder.markdown(text_content)
+            # Firebaseへの保存を非同期にする
+            async def save_to_firestore(latest_conversation, summary_title):
+                await db.collection('chat_history').add({
+                    'messages': latest_conversation,
+                    'summary_title': summary_title,
+                    'timestamp': firestore.SERVER_TIMESTAMP
+                })
+
+            # ... 既存のコード ...
 
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
-            st.error("APIキーを確認し、再試行してください。")
+            st.error("APIキーを確認し、再試行してくださ。")
             st.error(f"現在のモデル選択: {model_choice}")
 
 # HTMLコンテンツの表示
@@ -226,4 +226,4 @@ if st.button("会話履歴をクリア"):
 if 'reload_page' in st.session_state and st.session_state.reload_page:
     st.session_state.reload_page = False
     # {{ edit_1 }}: st.experimental_rerun()を削除し、セッション状態を使用
-    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
+    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
