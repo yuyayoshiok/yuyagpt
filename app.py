@@ -16,13 +16,13 @@ import json
 
 # .envファイルの再読み込み関数
 def reload_env():
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-    load_dotenv(dotenv_path, override=True)
+    # dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    # load_dotenv(dotenv_path, override=True)
     
     global openai_api_key, anthropic_api_key, gemini_api_key
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+    anthropic_api_key = st.secrets["general"]["ANTHROPIC_API_KEY"]
+    gemini_api_key = st.secrets["general"]["GEMINI_API_KEY"]
     
     global openai_client, anthropic_client
     openai_client = OpenAI(api_key=openai_api_key)
@@ -200,7 +200,14 @@ if prompt := st.chat_input():
                     'timestamp': firestore.SERVER_TIMESTAMP
                 })
 
-            # ... 既存のコード ...
+            # HTMLコンテンツの表示
+            if st.session_state.html_content:
+                with main:
+                    tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+                    with tab1:
+                        components.html(st.session_state.html_content, height=640, scrolling=True)
+                    with tab2:
+                        st.code(st.session_state.html_content, language="html")
 
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
