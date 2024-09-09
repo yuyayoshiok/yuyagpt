@@ -1,0 +1,9 @@
+streamlit
+openai
+anthropic
+google-generativeai
+requests
+beautifulsoup4
+python-dotenv
+firebase-admin
+scikit-learn
