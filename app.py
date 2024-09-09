@@ -15,7 +15,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    cred = credentials.Certificate('/Users/yuyayoshioka/aigpt/firebase_credentials.json')
+    # {{ edit_1 }}: 環境変数からFirebaseの認証情報のパスを取得
+    cred = credentials.Certificate(os.getenv('FIREBASE_CREDENTIALS_PATH'))
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -225,4 +226,4 @@ if st.button("会話履歴をクリア"):
 if 'reload_page' in st.session_state and st.session_state.reload_page:
     st.session_state.reload_page = False
     # {{ edit_1 }}: st.experimental_rerun()を削除し、セッション状態を使用
-    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
+    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
