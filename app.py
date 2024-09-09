@@ -14,7 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # 起動時に.envファイルを読み込む
-reload_env()
+load_dotenv()  # .envファイルの内容を環境変数としてロードする
 
 # Firebaseの初期化
 if not firebase_admin._apps:
