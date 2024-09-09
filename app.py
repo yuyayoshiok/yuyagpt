@@ -18,8 +18,13 @@ load_dotenv()  # .envファイルの内容を環境変数としてロードす�
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    cred = credentials.Certificate(os.getenv('FIREBASE_CREDENTIALS_PATH'))
+    # Firebaseのシークレット情報をst.secretsから取得してJSON形式に変換
+    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    
+    # Firebase認証情報を使ってアプリを初期化
+    cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
+
 db = firestore.client()
 
 # システムプロンプトの定義
