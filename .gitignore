@@ -1,1 +1,5 @@
+# 環境変数ファイル
 .env
+
+# Firebaseの認証情報
+firebase_credentials.json
