@@ -37,9 +37,9 @@ def reload_env():
     load_dotenv(dotenv_path, override=True)
     
     global openai_api_key, anthropic_api_key, gemini_api_key
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    openai_api_key = st.secrets["openai"]["api_key"]
+    anthropic_api_key = st.secrets["anthropic"]["api_key"]
+    gemini_api_key = st.secrets["gemini"]["api_key"]
     
     global openai_client, anthropic_client
     openai_client = OpenAI(api_key=openai_api_key)
