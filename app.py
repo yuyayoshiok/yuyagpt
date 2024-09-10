@@ -159,10 +159,14 @@ if prompt := st.chat_input():
                 
                 # エンコーディングがNoneの場合はデフォルトで'utf-8'を使用
                 if encoding is None:
-                    encoding = 'utf-8'  # デフォルトエンコーディングを設定
+                    encoding = 'utf-8'  # デフォルトエンコ��ディングを設定
                 
-                file_content = raw_data.decode(encoding)  # 検出されたエンコーディングでデコード
-                ai_prompt += f"\n\nファイル内容:\n{file_content}"
+                # エンコーディングがstrであることを確認
+                if isinstance(encoding, str):
+                    file_content = raw_data.decode(encoding)  # 検出されたエンコーディングでデコード
+                    ai_prompt += f"\n\nファイル内容:\n{file_content}"
+                else:
+                    st.error("ファイルのエンコーディングを検出できませんでした。")  # エラーメッセージを表示
             else:
                 st.warning("ファイルがアップロードされていません。")  # ファイルがアップロードされていない場合の警告
 
