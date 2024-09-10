@@ -8,21 +8,18 @@ from anthropic import Anthropic
 import google.generativeai as genai
 import requests
 from bs4 import BeautifulSoup
-import re
 import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import chardet  # 追加: chardetライブラリをインポート
 
 # 起動時に.envファイルを読み込む
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    # Firebaseのシークレット情報をst.secretsから取得してJSON形式に変換
     firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
-    
-    # Firebase認証情報を使ってアプリを初期化
     cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
 
@@ -58,11 +55,9 @@ def scrape_and_summarize(url):
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # 本文の取得（単純化のため、pタグのテキストのみを取得）
         paragraphs = soup.find_all('p')
         content = ' '.join([p.text for p in paragraphs])
         
-        # 内容の要約（ここでは簡単な要約として最初の500文字を使用）
         summary = content[:500] + "..." if len(content) > 500 else content
         
         return summary
@@ -130,6 +125,9 @@ model_choice = st.selectbox(
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
 )
 
+# ファイルアップロードの追加
+uploaded_file = st.file_uploader("ファイルをアップロードしてください", type=["txt", "pdf"])
+
 # 現在の会話を表示
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -152,7 +150,22 @@ if prompt := st.chat_input():
             
             # AIプロンプトの作成
             ai_prompt = f"{SYSTEM_PROMPT}\n\n過去の関連する会話:\n{context}\n\n現在の質問: {prompt}"
-            
+
+            # アップロードされたファイルの内容を取得
+            if uploaded_file is not None:
+                raw_data = uploaded_file.read()  # 生データを読み込む
+                result = chardet.detect(raw_data)  # エンコーディングを検出
+                encoding = result['encoding']  # 検出されたエンコーディングを取得
+                
+                # エンコーディングがNoneの場合はデフォルトで'utf-8'を使用
+                if encoding is None:
+                    encoding = 'utf-8'  # デフォルトエンコーディングを設定
+                
+                file_content = raw_data.decode(encoding)  # 検出されたエンコーディングでデコード
+                ai_prompt += f"\n\nファイル内容:\n{file_content}"
+            else:
+                st.warning("ファイルがアップロードされていません。")  # ファイルがアップロードされていない場合の警告
+
             # AIモデルにプロンプトを送信し、応答を生成
             if model_choice == "OpenAI GPT-4o-mini":
                 for chunk in openai_client.chat.completions.create(
