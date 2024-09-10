@@ -1,9 +1,11 @@
-streamlit
-openai
-anthropic
-google-generativeai
-requests
-beautifulsoup4
-python-dotenv
-firebase-admin
-scikit-learn
+   openai
+   anthropic
+   google-generativeai
+   requests
+   beautifulsoup4
+   firebase-admin
+   scikit-learn
+   llama-index
+   python-dotenv
+   streamlit
+   chardet
