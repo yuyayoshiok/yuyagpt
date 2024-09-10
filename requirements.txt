@@ -1,13 +1,9 @@
-streamlit==1.25.0
-openai==0.27.0
-anthropic==0.2.5
-google-generativeai==0.1.0
-requests==2.28.1
-beautifulsoup4==4.11.1
-firebase-admin==5.2.0
-scikit-learn==1.2.0  # バージョンを1.2.0に変更
-pytesseract==0.3.10
-Pillow==9.0.1
-PyPDF2==3.0.1
-cohere==3.2.1
-llama-index==0.5.27
+streamlit
+openai
+anthropic
+google-generativeai
+requests
+beautifulsoup4
+python-dotenv
+firebase-admin
+scikit-learn
