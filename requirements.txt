@@ -1,9 +1,13 @@
-streamlit
-openai
-anthropic
-google-generativeai
-requests
-beautifulsoup4
-python-dotenv
-firebase-admin
-scikit-learn
+streamlit==1.25.0  # Streamlitの最新バージョン（バージョンを調整してください）
+openai==0.27.0  # OpenAI APIを利用するため
+anthropic==0.2.5  # Claude APIを利用するため
+google-generativeai==0.1.0  # Gemini APIを利用するため
+requests==2.28.1  # スクレイピングやAPIリクエストに必要
+beautifulsoup4==4.11.1  # HTML解析のため
+firebase-admin==5.2.0  # Firebase接続のため
+scikit-learn==1.0.2  # TF-IDFとコサイン類似度のため
+pytesseract==0.3.10  # OCR機能のため（画像認識機能を使う場合）
+Pillow==9.0.1  # 画像処理のため
+PyPDF2==3.0.1  # PDF読み取りのため
+cohere==3.2.1  # Command-R+ モデルに利用
+llama-index==0.5.27  # `VectorStoreIndex`や`SimpleDirectoryReader`などの機能を利用
