@@ -12,7 +12,6 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import chardet  # 追加: chardetライブラリをインポート
 
 # 起動時に.envファイルを読み込む
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
