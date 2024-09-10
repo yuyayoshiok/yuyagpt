@@ -10,4 +10,4 @@ pytesseract==0.3.10  # OCR機能のため（画像認識機能を使う場合）
 Pillow==9.0.1  # 画像処理のため
 PyPDF2==3.0.1  # PDF読み取りのため
 cohere==3.2.1  # Command-R+ モデルに利用
-llama-index==0.5.27  # `VectorStoreIndex`や`SimpleDirectoryReader`などの機能を利用
+llama-index
