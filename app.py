@@ -30,6 +30,42 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
+    "必ず、文章とコードブロックは分けて出力してください。"
+)
+
+import json
+import os
+import re
+from dotenv import load_dotenv
+import streamlit as st
+import streamlit.components.v1 as components
+from openai import OpenAI
+from anthropic import Anthropic
+import google.generativeai as genai
+import requests
+from bs4 import BeautifulSoup
+import firebase_admin
+from firebase_admin import credentials, firestore
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 起動時に.envファイルを読み込む
+load_dotenv()
+
+# Firebaseの初期化
+if not firebase_admin._apps:
+    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    cred = credentials.Certificate(firebase_credentials)
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
+
+# システムプロンプトの定義
+SYSTEM_PROMPT = (
+    "あなたはプロのエンジニアでありプログラマーです。"
+    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
+    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
+    "チャットでは日本語で応対してください。"
     "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
 )
 
@@ -48,18 +84,32 @@ def reload_env():
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
 
+# URLを検出する関数
+def detect_url(text):
+    url_pattern = re.compile(r'https?://\S+')
+    return url_pattern.search(text)
+
 # スクレイピングと要約の関数
 def scrape_and_summarize(url):
     try:
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
         
+        # タイトルの取得
+        title = soup.title.string if soup.title else "No title found"
+        
+        # メタディスクリプションの取得
+        meta_desc = soup.find('meta', attrs={'name': 'description'})
+        description = meta_desc['content'] if meta_desc else "No description found"
+        
+        # 本文の取得
         paragraphs = soup.find_all('p')
         content = ' '.join([p.text for p in paragraphs])
         
+        # 要約（最初の500文字）
         summary = content[:500] + "..." if len(content) > 500 else content
         
-        return summary
+        return f"Title: {title}\nDescription: {description}\nSummary: {summary}"
     except Exception as e:
         return f"エラーが発生しました: {str(e)}"
 
@@ -153,6 +203,13 @@ for message in st.session_state.messages[1:]:  # システムメッセージを�
 
 # ユーザー入力の処理
 if prompt := st.chat_input():
+    # URLの検出
+    url_match = detect_url(prompt)
+    if url_match:
+        url = url_match.group()
+        summary = scrape_and_summarize(url)
+        prompt += f"\n\nURL content summary:\n{summary}"
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
