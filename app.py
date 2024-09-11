@@ -204,7 +204,7 @@ if prompt := st.chat_input():
             st.error(f"現在のモデル選択: {model_choice}")
 
 # HTMLコンテンツの表示
-if st.session_state.html_content:
+if "html_content" in st.session_state and st.session_state.html_content:  # 存在確認を追加
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
         with tab1:
