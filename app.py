@@ -36,18 +36,17 @@ SYSTEM_PROMPT = (
 
 # HTML生成ツールの定義
 html_viewer_tool = {
-    "toolSpec": {
+    "type": "function",
+    "function": {
         "name": "html_viewer",
         "description": "HTMLを表示します。",
-        "inputSchema": {
-            "json": {
-                "type": "object",
-                "properties": {
-                    "html": {"type": "string", "description": "HTML Document"}
-                },
-                "required": ["html"],
-            }
-        },
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "html": {"type": "string", "description": "HTML Document"}
+            },
+            "required": ["html"],
+        }
     }
 }
 
@@ -124,10 +123,10 @@ def get_context(current_query, chat_history, max_tokens=1000):
         
         context.append(f"過去の関連会話: {summary}")
         for msg in messages:
-            if total_tokens + len(msg['content'].split()) > max_tokens:
+            if total_tokens + len(msg['content'][0]['text'].split()) > max_tokens:
                 break
-            context.append(f"{msg['role']}: {msg['content']}")
-            total_tokens += len(msg['content'].split())
+            context.append(f"{msg['role']}: {msg['content'][0]['text']}")
+            total_tokens += len(msg['content'][0]['text'].split())
     
     return '\n\n'.join(context)
 
@@ -136,22 +135,41 @@ def convert_messages_for_gemini(messages):
     converted = []
     for msg in messages:
         if msg['role'] == 'user':
-            converted.append({"role": "user", "parts": [{"text": msg['content']}]})
+            converted.append({"role": "user", "parts": [{"text": msg['content'][0]['text']}]})
         elif msg['role'] == 'assistant':
-            converted.append({"role": "model", "parts": [{"text": msg['content']}]})
+            converted.append({"role": "model", "parts": [{"text": msg['content'][0]['text']}]})
         elif msg['role'] == 'system':
             # システムメッセージは最初のユーザーメッセージに組み込む
             if converted and converted[0]['role'] == 'user':
-                converted[0]['parts'][0]['text'] = msg['content'] + "\n" + converted[0]['parts'][0]['text']
+                converted[0]['parts'][0]['text'] = msg['content'][0]['text'] + "\n" + converted[0]['parts'][0]['text']
             else:
-                converted.insert(0, {"role": "user", "parts": [{"text": msg['content']}]})
+                converted.insert(0, {"role": "user", "parts": [{"text": msg['content'][0]['text']}]})
     return converted
 
 # Claude用のメッセージ変換関数
 def convert_messages_for_claude(messages):
-    system_message = next((msg['content'] for msg in messages if msg['role'] == 'system'), None)
-    user_assistant_messages = [msg for msg in messages if msg['role'] != 'system']
+    system_message = next((msg['content'][0]['text'] for msg in messages if msg['role'] == 'system'), None)
+    user_assistant_messages = [{"role": msg['role'], "content": msg['content'][0]['text']} for msg in messages if msg['role'] != 'system']
     return system_message, user_assistant_messages
+
+# OpenAIの応答をパースする関数
+def parse_openai_response(response):
+    message = response.choices[0].message
+    content = message.content if message.content else ""
+    tool_calls = message.tool_calls if hasattr(message, 'tool_calls') else []
+    
+    parsed_content = [{"text": content}] if content else []
+    for tool_call in tool_calls:
+        if tool_call.function.name == "html_viewer":
+            parsed_content.append({
+                "toolUse": {
+                    "toolUseId": tool_call.id,
+                    "name": tool_call.function.name,
+                    "input": json.loads(tool_call.function.arguments)
+                }
+            })
+    
+    return {"role": "assistant", "content": parsed_content}
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -220,7 +238,7 @@ if prompt := st.chat_input():
                     tools=[html_viewer_tool],
                     tool_choice="auto"
                 )
-                ai_message = response.choices[0].message
+                ai_message = parse_openai_response(response)
                 
             elif model_choice == "Claude 3.5 Sonnet":
                 system_message, user_assistant_messages = convert_messages_for_claude(st.session_state.messages)
@@ -231,7 +249,7 @@ if prompt := st.chat_input():
                     messages=user_assistant_messages,
                     tools=[html_viewer_tool]
                 )
-                ai_message = response.content[0]
+                ai_message = {"role": "assistant", "content": [{"text": response.content[0].text}]}
 
             else:  # Gemini 1.5 flash
                 model = genai.GenerativeModel('gemini-1.5-flash')
