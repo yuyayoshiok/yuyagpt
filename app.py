@@ -14,7 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # 起動時に.envファイルを読み込む
-load_dotenv()  # .envファイルの内容を環境変数としてロードする
+load_dotenv()
 
 # Firebaseの初期化
 if not firebase_admin._apps:
@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
-    "必ず文章とコードブロックは分けて出力してください。"
+    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
 )
 
 # .envファイルの再読み込み関数
@@ -65,7 +65,7 @@ def scrape_and_summarize(url):
 
 # 関連する過去の会話を選択する関数
 def select_relevant_conversations(query, chat_history, top_n=3):
-    if not chat_history:  # チャット履歴が空の場合
+    if not chat_history:
         return []
 
     vectorizer = TfidfVectorizer()
@@ -110,8 +110,8 @@ if not openai_api_key or not anthropic_api_key or not gemini_api_key:
     st.stop()
 
 # セッション状態の初期化
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 # メインコンテナの設定
 main = st.container()
@@ -122,20 +122,16 @@ model_choice = st.selectbox(
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
 )
 
+# 過去のメッセージを表示
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
 # ユーザー入力の処理
 if prompt := st.chat_input():
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-
-    # これまでの会話履歴を取得
-    messages = []
-    for message in st.session_state.chat_history:
-        messages.append(
-            {
-                "role": message["role"],
-                'parts': message["content"]
-            }
-        )
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
@@ -177,11 +173,11 @@ if prompt := st.chat_input():
                     full_response += chunk.text
                     message_placeholder.markdown(full_response + "▌")
 
-            # 返答をチャット履歴に追加
-            st.session_state.chat_history.append({"role": "assistant", "content": full_response})  # 会話履歴に追加
+            message_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
 
             # 会話履歴をFirebaseに保存（最新の会話のみ）
-            latest_conversation = st.session_state.chat_history[-2:]
+            latest_conversation = st.session_state.messages[-2:]
             
             # 会話の要約タイトルを生成
             summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content']}\nAI: {latest_conversation[1]['content']}"
@@ -204,7 +200,7 @@ if prompt := st.chat_input():
             st.error(f"現在のモデル選択: {model_choice}")
 
 # HTMLコンテンツの表示
-if "html_content" in st.session_state and st.session_state.html_content:  # 存在確認を追加
+if 'html_content' in st.session_state and st.session_state.html_content:
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
         with tab1:
@@ -214,9 +210,5 @@ if "html_content" in st.session_state and st.session_state.html_content:  # 存�
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
-    st.session_state.chat_history = []
-    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
-
-# ページの再読み込み処理
-if 'reload_page' in st.session_state and st.session_state.reload_page:
-    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
+    st.session_state.messages = []
+    st.experimental_rerun()
