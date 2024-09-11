@@ -107,9 +107,10 @@ if prompt := st.chat_input():
                 full_response = response.choices[0].message.content
 
             elif model_choice == "Claude 3.5 Sonnet":
+                # プロンプト形式にHumanとAssistantを追加
                 response = anthropic_client.completions.create(
                     model="claude-3-5",
-                    prompt=prompt,
+                    prompt=f"\n\nHuman: {prompt}\n\nAssistant:",
                     max_tokens_to_sample=8000,
                 )
                 full_response = response.completion
