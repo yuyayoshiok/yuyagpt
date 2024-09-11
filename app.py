@@ -14,7 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # 起動時に.envファイルを読み込む
-load_dotenv()  # .envファイルの内容を環境変数としてロードする
+load_dotenv()
 
 # Firebaseの初期化
 if not firebase_admin._apps:
@@ -65,7 +65,7 @@ def scrape_and_summarize(url):
 
 # 関連する過去の会話を選択する関数
 def select_relevant_conversations(query, chat_history, top_n=3):
-    if not chat_history:  # チャット履歴が空の場合
+    if not chat_history:
         return []
 
     vectorizer = TfidfVectorizer()
@@ -92,7 +92,6 @@ def get_context(current_query, chat_history, max_tokens=1000):
         
         context.append(f"過去の関連会話: {summary}")
         for msg in messages:
-            # msg['content']が辞書のリストの場合、その中のテキストを結合
             if isinstance(msg['content'], list):
                 message_text = ' '.join([part['text'] if isinstance(part, dict) and 'text' in part else str(part) for part in msg['content']])
             else:
@@ -118,6 +117,14 @@ if not openai_api_key or not anthropic_api_key or not gemini_api_key:
 # セッション状態の初期化
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+
+if "html_content" not in st.session_state:
+    st.session_state.html_content = None  # 初期化
+
+# 過去の会話履歴を表示する部分
+for message in st.session_state.chat_history:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
 
 # メインコンテナの設定
 main = st.container()
@@ -200,14 +207,13 @@ if prompt := st.chat_input():
             st.error(f"現在のモデル選択: {model_choice}")
 
 # HTMLコンテンツの表示
-if "html_content" in st.session_state:
-    if st.session_state.html_content:  # 存在をチェック
-        with main:
-            tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
-            with tab1:
-                components.html(st.session_state.html_content, height=640, scrolling=True)
-            with tab2:
-                st.code(st.session_state.html_content, language="html")
+if st.session_state.html_content:
+    with main:
+        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+        with tab1:
+            components.html(st.session_state.html_content, height=640, scrolling=True)
+        with tab2:
+            st.code(st.session_state.html_content, language="html")
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
