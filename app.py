@@ -19,9 +19,13 @@ load_dotenv()
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
-    cred = credentials.Certificate(firebase_credentials)
-    firebase_admin.initialize_app(cred)
+    try:
+        firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+        cred = credentials.Certificate(firebase_credentials)
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"Firebaseの初期化に失敗しました: {str(e)}")
+        st.stop()
 
 db = firestore.client()
 
@@ -225,94 +229,98 @@ if prompt := st.chat_input():
     user_message = {"role": "user", "content": [{"text": prompt}]}
     st.session_state.messages.append(user_message)
 
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
+    # チェック: ユーザーのメッセージが連続していないか確認
+    if len(st.session_state.messages) > 1 and st.session_state.messages[-2]["role"] == "user":
+        st.error("ユーザーのメッセージが連続しています。AI応答を待ってください。")
+    else:
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
 
-        try:
-            # AIモデルにプロンプトを送信し、応答を生成
-            if model_choice == "OpenAI GPT-4o-mini":
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": m["role"], "content": m["content"][0]["text"]} for m in st.session_state.messages],
-                    tools=[html_viewer_tool],
-                    tool_choice="auto"
-                )
-                ai_message = parse_openai_response(response)
-                
-            elif model_choice == "Claude 3.5 Sonnet":
-                system_message, user_assistant_messages = convert_messages_for_claude(st.session_state.messages)
-                response = anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
-                    max_tokens=8000,
-                    system=system_message,
-                    messages=user_assistant_messages
-                )
-                ai_message = {"role": "assistant", "content": [{"text": response.content[0].text}] if response.content else []}
-
-            else:  # Gemini 1.5 flash
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                gemini_messages = convert_messages_for_gemini(st.session_state.messages[-5:])  # 直近5つのメッセージのみを使用
-                response = model.generate_content(gemini_messages)
-                ai_message = {"role": "assistant", "content": [{"text": response.text}] if response.text else []}
-
-            st.session_state.messages.append(ai_message)
-
-            for content in ai_message["content"]:
-                if "text" in content:
-                    message_placeholder.markdown(content["text"])
-                if "toolUse" in content:
-                    tool_use = content["toolUse"]
-                    tool_use_id = tool_use["toolUseId"]
-                    name = tool_use["name"]
-                    html = tool_use["input"]["html"]
-                    with main:
-                        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
-                        with tab1:
-                            components.html(
-                                html,
-                                height=640,
-                                scrolling=True,
-                            )
-                        with tab2:
-                            st.markdown(f"```html\n{html}\n```")
-                    st.session_state.messages.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "toolResult": {
-                                        "toolUseId": tool_use_id,
-                                        "content": [{"text": "Done."}],
-                                    }
-                                }
-                            ],
-                        }
+            try:
+                # AIモデルにプロンプトを送信し、応答を生成
+                if model_choice == "OpenAI GPT-4o-mini":
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": m["role"], "content": m["content"][0]["text"]} for m in st.session_state.messages],
+                        tools=[html_viewer_tool],
+                        tool_choice="auto"
                     )
-                    st.session_state.messages.append({"role": "assistant", "content": [{"text": "OK."}]})
+                    ai_message = parse_openai_response(response)
 
-            # 会話履歴をFirebaseに保存（最新の会話のみ）
-            latest_conversation = st.session_state.messages[-2:]
-            
-            # 会話の要約タイトルを生成
-            summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content'][0]['text']}\nAI: {latest_conversation[1]['content'][0]['text']}"
-            summary_response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": summary_prompt}],
-                max_tokens=10
-            )
-            summary_title = summary_response.choices[0].message.content.strip()
-            
-            db.collection('chat_history').add({
-                'messages': latest_conversation,
-                'summary_title': summary_title,
-                'timestamp': firestore.SERVER_TIMESTAMP
-            })
+                elif model_choice == "Claude 3.5 Sonnet":
+                    system_message, user_assistant_messages = convert_messages_for_claude(st.session_state.messages)
+                    response = anthropic_client.messages.create(
+                        model="claude-3-5-sonnet-20240620",
+                        max_tokens=8000,
+                        system=system_message,
+                        messages=user_assistant_messages
+                    )
+                    ai_message = {"role": "assistant", "content": [{"text": response.content[0].text}] if response.content else []}
 
-        except Exception as e:
-            st.error(f"エラーが発生しました: {str(e)}")
-            st.error("APIキーを確認し、再試行してください。")
-            st.error(f"現在のモデル選択: {model_choice}")
+                else:  # Gemini 1.5 flash
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    gemini_messages = convert_messages_for_gemini(st.session_state.messages[-5:])  # 直近5つのメッセージのみを使用
+                    response = model.generate_content(gemini_messages)
+                    ai_message = {"role": "assistant", "content": [{"text": response.text}] if response.text else []}
+
+                st.session_state.messages.append(ai_message)
+
+                for content in ai_message["content"]:
+                    if "text" in content:
+                        message_placeholder.markdown(content["text"])
+                    if "toolUse" in content:
+                        tool_use = content["toolUse"]
+                        tool_use_id = tool_use["toolUseId"]
+                        name = tool_use["name"]
+                        html = tool_use["input"]["html"]
+                        with main:
+                            tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+                            with tab1:
+                                components.html(
+                                    html,
+                                    height=640,
+                                    scrolling=True,
+                                )
+                            with tab2:
+                                st.markdown(f"```html\n{html}\n```")
+                        st.session_state.messages.append(
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "toolResult": {
+                                            "toolUseId": tool_use_id,
+                                            "content": [{"text": "Done."}],
+                                        }
+                                    }
+                                ],
+                            }
+                        )
+                        st.session_state.messages.append({"role": "assistant", "content": [{"text": "OK."}]})
+
+                # 会話履歴をFirebaseに保存（最新の会話のみ）
+                latest_conversation = st.session_state.messages[-2:]
+
+                # 会話の要約タイトルを生成
+                summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content'][0]['text']}\nAI: {latest_conversation[1]['content'][0]['text']}"
+                summary_response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": summary_prompt}],
+                    max_tokens=10
+                )
+                summary_title = summary_response.choices[0].message.content.strip()
+
+                db.collection('chat_history').add({
+                    'messages': latest_conversation,
+                    'summary_title': summary_title,
+                    'timestamp': firestore.SERVER_TIMESTAMP
+                })
+
+            except Exception as e:
+                st.error(f"エラーが発生しました: {str(e)}")
+                st.error("APIキーを確認し、再試行してください。")
+                st.error(f"現在のモデル選択: {model_choice}")
 
 # 会話履歴のクリアボタン
 if sidebar.button("会話履歴をクリア"):
