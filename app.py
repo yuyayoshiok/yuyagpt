@@ -7,16 +7,16 @@ from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
 import requests
-from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
+import re
 
 # 起動時に.envファイルを読み込む
 load_dotenv()
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    firebase_credentials = json.loads(st.secrets['FIREBASE']['FIREBASE_CREDENTIALS'])
     cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
 
@@ -104,7 +104,7 @@ if prompt := st.chat_input():
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                 )
-                full_response = response.choices[0].message.content  # 修正
+                full_response = response.choices[0].message.content
 
             elif model_choice == "Claude 3.5 Sonnet":
                 response = anthropic_client.messages.create(
@@ -112,7 +112,8 @@ if prompt := st.chat_input():
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=8000,
                 )
-                full_response = response.completion
+                # Claudeのレスポンス形式に応じて修正
+                full_response = response.completion.text  # completionをtextに修正
 
             elif model_choice == "Gemini 1.5 flash":
                 response = genai.GenerativeModel('gemini-1.5-flash').generate_content(prompt)
@@ -122,9 +123,11 @@ if prompt := st.chat_input():
             message_placeholder.markdown(full_response)
             st.session_state.chat_history.append({"role": "assistant", "content": full_response})
 
-            # HTMLプレビューとソースコードを出力
-            if "HTML" in full_response or "html" in full_response:
+            # HTMLプレビューとソースコードの分離
+            if re.search(r"<html>|<body>", full_response):  # HTMLタグが含まれているか確認
                 st.session_state.html_content = full_response  # HTMLの保存
+            else:
+                st.session_state.html_content = None  # HTMLではない場合はクリア
 
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
