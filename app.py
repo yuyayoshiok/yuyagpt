@@ -104,7 +104,8 @@ if prompt := st.chat_input():
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                 )
-                full_response = response.choices[0].message["content"]
+                full_response = response.choices[0].message.content  # 修正
+
             elif model_choice == "Claude 3.5 Sonnet":
                 response = anthropic_client.messages.create(
                     model="claude-3-5-sonnet-20240620",
@@ -112,6 +113,7 @@ if prompt := st.chat_input():
                     max_tokens=8000,
                 )
                 full_response = response.completion
+
             elif model_choice == "Gemini 1.5 flash":
                 response = genai.GenerativeModel('gemini-1.5-flash').generate_content(prompt)
                 full_response = response.text
