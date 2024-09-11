@@ -12,7 +12,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import json
+import json #追加
 
 # 起動時に.envファイルを読み込む
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
