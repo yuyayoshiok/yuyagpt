@@ -249,13 +249,13 @@ if prompt := st.chat_input():
                     messages=user_assistant_messages,
                     tools=[html_viewer_tool]
                 )
-                ai_message = {"role": "assistant", "content": [{"text": response.content[0].text}]}
+                ai_message = {"role": "assistant", "content": [{"text": response.content[0].text}] if response.content else []}
 
             else:  # Gemini 1.5 flash
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 gemini_messages = convert_messages_for_gemini(st.session_state.messages[-5:])  # 直近5つのメッセージのみを使用
                 response = model.generate_content(gemini_messages)
-                ai_message = {"role": "assistant", "content": [{"text": response.text}]}
+                ai_message = {"role": "assistant", "content": [{"text": response.text}] if response.text else []}
 
             st.session_state.messages.append(ai_message)
 
