@@ -12,6 +12,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import json
 
 # 起動時に.envファイルを読み込む
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
@@ -41,15 +42,24 @@ def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path, override=True)
     
-    global openai_api_key, anthropic_api_key, gemini_api_key
+    global openai_api_key, anthropic_api_key, gemini_api_key, dify_api_key, dify_api_url
     openai_api_key = st.secrets["openai"]["api_key"]
     anthropic_api_key = st.secrets["anthropic"]["api_key"]
     gemini_api_key = st.secrets["gemini"]["api_key"]
+    dify_api_key = st.secrets["dify"]["api_key"]
+    dify_api_url = st.secrets["dify"]["api_url"]
     
     global openai_client, anthropic_client
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
+
+# Difyクライアントの初期化関数
+def init_dify_client():
+    return {
+        "api_key": dify_api_key,
+        "api_url": dify_api_url
+    }
 
 # スクレイピングと要約の関数
 def scrape_and_summarize(url):
@@ -104,13 +114,29 @@ def get_context(current_query, chat_history, max_tokens=1000):
     
     return '\n\n'.join(context)
 
+# Difyを使用してメッセージを送信する関数
+def send_message_to_dify(dify_client, message):
+    headers = {
+        "Authorization": f"Bearer {dify_client['api_key']}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "inputs": {},
+        "query": message,
+        "response_mode": "streaming",
+        "conversation_id": None,
+        "user": "user"
+    }
+    response = requests.post(f"{dify_client['api_url']}/chat-messages", headers=headers, json=data, stream=True)
+    return response
+
 # 起動時に.envファイルを読み込む
 reload_env()
 
 st.title("YuyaGPT")
 
 # APIキーが正しく取得できたか確認
-if not openai_api_key or not anthropic_api_key or not gemini_api_key:
+if not openai_api_key or not anthropic_api_key or not gemini_api_key or not dify_api_key or not dify_api_url:
     st.error("APIキーが正しく設定されていません。.envファイルを確認してください。")
     st.stop()
 
@@ -126,7 +152,7 @@ main = st.container()
 # モデル選択のプルダウン
 model_choice = st.selectbox(
     "モデルを選択してください",
-    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
+    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "モダン会議室"]
 )
 
 # 現在の会話を表示
@@ -173,12 +199,22 @@ if prompt := st.chat_input():
                         full_response += text
                         message_placeholder.markdown(full_response + "▌")
 
-            else:  # Gemini 1.5 flash
+            elif model_choice == "Gemini 1.5 flash":
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 response = model.generate_content(ai_prompt, stream=True)
                 for chunk in response:
                     full_response += chunk.text
                     message_placeholder.markdown(full_response + "▌")
+
+            elif model_choice == "モダン会議室":
+                dify_client = init_dify_client()
+                response = send_message_to_dify(dify_client, prompt)
+                for chunk in response.iter_lines():
+                    if chunk:
+                        chunk_data = json.loads(chunk.decode('utf-8'))
+                        if 'answer' in chunk_data:
+                            full_response += chunk_data['answer']
+                            message_placeholder.markdown(full_response + "▌")
 
             message_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
@@ -233,4 +269,4 @@ if st.button("会話履歴をクリア"):
 if 'reload_page' in st.session_state and st.session_state.reload_page:
     st.session_state.reload_page = False
     # {{ edit_1 }}: st.experimental_rerun()を削除し、セッション状態を使用
-    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
+    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
