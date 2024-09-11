@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
-    "必ず文章とコードブロックは分けて出力してください。"
+    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
 )
 
 # .envファイルの再読み込み関数
@@ -98,6 +98,17 @@ def get_context(current_query, chat_history, max_tokens=1000):
             total_tokens += len(msg['content'].split())
     
     return '\n\n'.join(context)
+
+# Gemini用のメッセージ変換関数
+def convert_messages_for_gemini(messages):
+    converted = []
+    for msg in messages:
+        if msg['role'] == 'user':
+            converted.append(genai.types.ContentType.USER_INPUT)
+        elif msg['role'] == 'assistant':
+            converted.append(genai.types.ContentType.AI_RESPONSE)
+        converted.append(msg['content'])
+    return converted
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -167,10 +178,12 @@ if prompt := st.chat_input():
 
             else:  # Gemini 1.5 flash
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(st.session_state.messages[-5:], stream=True)  # 直近5つのメッセージのみを使用
+                gemini_messages = convert_messages_for_gemini(st.session_state.messages[-5:])  # 直近5つのメッセージのみを使用
+                response = model.generate_content(gemini_messages, stream=True)
                 for chunk in response:
-                    full_response += chunk.text
-                    message_placeholder.markdown(full_response + "▌")
+                    if chunk.text:
+                        full_response += chunk.text
+                        message_placeholder.markdown(full_response + "▌")
 
             message_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
