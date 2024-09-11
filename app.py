@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
-    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
+    "必ず文章とコードブロックは分けて出力してください。"
 )
 
 # .envファイルの再読み込み関数
@@ -127,6 +127,16 @@ if prompt := st.chat_input():
     st.session_state.chat_history.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
+    # これまでの会話履歴を取得
+    messages = []
+    for message in st.session_state.chat_history:
+        messages.append(
+            {
+                "role": message["role"],
+                'parts': message["content"]
+            }
+        )
+
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
@@ -167,7 +177,7 @@ if prompt := st.chat_input():
                     full_response += chunk.text
                     message_placeholder.markdown(full_response + "▌")
 
-            message_placeholder.markdown(full_response)
+            # 返答をチャット履歴に追加
             st.session_state.chat_history.append({"role": "assistant", "content": full_response})  # 会話履歴に追加
 
             # 会話履歴をFirebaseに保存（最新の会話のみ）
