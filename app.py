@@ -8,7 +8,6 @@ from anthropic import Anthropic
 import google.generativeai as genai
 import requests
 from bs4 import BeautifulSoup
-import re
 import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -19,10 +18,7 @@ load_dotenv()  # .envファイルの内容を環境変数としてロードす�
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    # Firebaseのシークレット情報をst.secretsから取得してJSON形式に変換
     firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
-    
-    # Firebase認証情報を使ってアプリを初期化
     cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
 
@@ -58,11 +54,9 @@ def scrape_and_summarize(url):
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # 本文の取得（単純化のため、pタグのテキストのみを取得）
         paragraphs = soup.find_all('p')
         content = ' '.join([p.text for p in paragraphs])
         
-        # 内容の要約（ここでは簡単な要約として最初の500文字を使用）
         summary = content[:500] + "..." if len(content) > 500 else content
         
         return summary
@@ -98,10 +92,16 @@ def get_context(current_query, chat_history, max_tokens=1000):
         
         context.append(f"過去の関連会話: {summary}")
         for msg in messages:
-            if total_tokens + len(msg['content'].split()) > max_tokens:
+            # msg['content']がリストの場合、その内容を結合して文字列に変換
+            if isinstance(msg['content'], list):
+                message_text = ' '.join(msg['content'])
+            else:
+                message_text = msg['content']
+            
+            if total_tokens + len(message_text.split()) > max_tokens:
                 break
-            context.append(f"{msg['role']}: {msg['content']}")
-            total_tokens += len(msg['content'].split())
+            context.append(f"{msg['role']}: {message_text}")
+            total_tokens += len(message_text.split())
     
     return '\n\n'.join(context)
 
@@ -116,10 +116,8 @@ if not openai_api_key or not anthropic_api_key or not gemini_api_key:
     st.stop()
 
 # セッション状態の初期化
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "html_content" not in st.session_state:
-    st.session_state.html_content = None
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 # メインコンテナの設定
 main = st.container()
@@ -130,16 +128,10 @@ model_choice = st.selectbox(
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
 )
 
-# 現在の会話を表示
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
 # ユーザー入力の処理
 if prompt := st.chat_input():
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
+    st.chat_message("user").write(prompt)
 
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
@@ -152,7 +144,7 @@ if prompt := st.chat_input():
             
             # AIプロンプトの作成
             ai_prompt = f"{SYSTEM_PROMPT}\n\n過去の関連する会話:\n{context}\n\n現在の質問: {prompt}"
-            
+
             # AIモデルにプロンプトを送信し、応答を生成
             if model_choice == "OpenAI GPT-4o-mini":
                 for chunk in openai_client.chat.completions.create(
@@ -182,10 +174,10 @@ if prompt := st.chat_input():
                     message_placeholder.markdown(full_response + "▌")
 
             message_placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            st.session_state.chat_history.append({"role": "assistant", "content": full_response})  # 会話履歴に追加
 
             # 会話履歴をFirebaseに保存（最新の会話のみ）
-            latest_conversation = st.session_state.messages[-2:]
+            latest_conversation = st.session_state.chat_history[-2:]
             
             # 会話の要約タイトルを生成
             summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content']}\nAI: {latest_conversation[1]['content']}"
@@ -202,36 +194,27 @@ if prompt := st.chat_input():
                 'timestamp': firestore.SERVER_TIMESTAMP
             })
 
-            # HTMLコンテンツの抽出
-            html_start = full_response.find("<html")
-            if html_start != -1:
-                html_end = full_response.rfind("</html>") + 7
-                st.session_state.html_content = full_response[html_start:html_end]
-                text_content = full_response[:html_start] + full_response[html_end:]
-                message_placeholder.markdown(text_content)
-
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
             st.error("APIキーを確認し、再試行してください。")
             st.error(f"現在のモデル選択: {model_choice}")
 
 # HTMLコンテンツの表示
-if st.session_state.html_content:
-    with main:
-        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
-        with tab1:
-            components.html(st.session_state.html_content, height=640, scrolling=True)
-        with tab2:
-            st.code(st.session_state.html_content, language="html")
+if "html_content" in st.session_state:
+    if st.session_state.html_content:  # 存在をチェック
+        with main:
+            tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+            with tab1:
+                components.html(st.session_state.html_content, height=640, scrolling=True)
+            with tab2:
+                st.code(st.session_state.html_content, language="html")
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
-    st.session_state.messages = []
-    st.session_state.html_content = None
+    st.session_state.chat_history = []
     st.session_state.reload_page = True  # ページの再読み込みフラグを設定
 
 # ページの再読み込み処理
 if 'reload_page' in st.session_state and st.session_state.reload_page:
     st.session_state.reload_page = False
-    # {{ edit_1 }}: st.experimental_rerun()を削除し、セッション状態を使用
-    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
+    st.experimental_rerun()
