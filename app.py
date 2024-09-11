@@ -1,40 +1,5 @@
 import json
 import os
-from dotenv import load_dotenv
-import streamlit as st
-import streamlit.components.v1 as components
-from openai import OpenAI
-from anthropic import Anthropic
-import google.generativeai as genai
-import requests
-from bs4 import BeautifulSoup
-import firebase_admin
-from firebase_admin import credentials, firestore
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
-# 起動時に.envファイルを読み込む
-load_dotenv()
-
-# Firebaseの初期化
-if not firebase_admin._apps:
-    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
-    cred = credentials.Certificate(firebase_credentials)
-    firebase_admin.initialize_app(cred)
-
-db = firestore.client()
-
-# システムプロンプトの定義
-SYSTEM_PROMPT = (
-    "あなたはプロのエンジニアでありプログラマーです。"
-    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
-    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
-    "チャットでは日本語で応対してください。"
-    "必ず、文章とコードブロックは分けて出力してください。"
-)
-
-import json
-import os
 import re
 from dotenv import load_dotenv
 import streamlit as st
@@ -68,6 +33,23 @@ SYSTEM_PROMPT = (
     "チャットでは日本語で応対してください。"
     "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
 )
+
+# HTML生成ツールの定義
+html_viewer_tool = {
+    "toolSpec": {
+        "name": "html_viewer",
+        "description": "HTMLを表示します。",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "HTML Document"}
+                },
+                "required": ["html"],
+            }
+        },
+    }
+}
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -184,22 +166,30 @@ if not openai_api_key or not anthropic_api_key or not gemini_api_key:
 # セッション状態の初期化
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "system", "content": SYSTEM_PROMPT}
+        {"role": "system", "content": [{"text": SYSTEM_PROMPT}]}
     ]
 
 # メインコンテナの設定
 main = st.container()
 
+# サイドバーの設定
+sidebar = st.sidebar
+
 # モデル選択のプルダウン
-model_choice = st.selectbox(
+model_choice = sidebar.selectbox(
     "モデルを選択してください",
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
 )
 
 # 過去のメッセージを表示
-for message in st.session_state.messages[1:]:  # システムメッセージをスキップ
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+with sidebar:
+    st.subheader("チャットエリア")
+    for message in st.session_state.messages:
+        if message["role"] != "system":
+            for content in message["content"]:
+                if "text" in content and not (content["text"] == "OK."):
+                    with st.chat_message(message["role"]):
+                        st.markdown(content["text"])
 
 # ユーザー入力の処理
 if prompt := st.chat_input():
@@ -210,61 +200,85 @@ if prompt := st.chat_input():
         summary = scrape_and_summarize(url)
         prompt += f"\n\nURL content summary:\n{summary}"
 
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with sidebar:
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+    user_message = {"role": "user", "content": [{"text": prompt}]}
+    st.session_state.messages.append(user_message)
 
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
 
         try:
-            # 過去の関連する会話のコンテキストを取得
-            chat_history = db.collection('chat_history').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(20).get()
-            context = get_context(prompt, [doc.to_dict() for doc in chat_history])
-            
             # AIモデルにプロンプトを送信し、応答を生成
             if model_choice == "OpenAI GPT-4o-mini":
-                for chunk in openai_client.chat.completions.create(
+                response = openai_client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=st.session_state.messages,
-                    stream=True
-                ):
-                    if chunk.choices[0].delta.content is not None:
-                        full_response += chunk.choices[0].delta.content
-                        message_placeholder.markdown(full_response + "▌")
-
+                    messages=[{"role": m["role"], "content": m["content"][0]["text"]} for m in st.session_state.messages],
+                    tools=[html_viewer_tool],
+                    tool_choice="auto"
+                )
+                ai_message = response.choices[0].message
+                
             elif model_choice == "Claude 3.5 Sonnet":
                 system_message, user_assistant_messages = convert_messages_for_claude(st.session_state.messages)
-                with anthropic_client.messages.stream(
+                response = anthropic_client.messages.create(
                     model="claude-3-5-sonnet-20240620",
                     max_tokens=8000,
                     system=system_message,
-                    messages=user_assistant_messages
-                ) as stream:
-                    for text in stream.text_stream:
-                        full_response += text
-                        message_placeholder.markdown(full_response + "▌")
+                    messages=user_assistant_messages,
+                    tools=[html_viewer_tool]
+                )
+                ai_message = response.content[0]
 
             else:  # Gemini 1.5 flash
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 gemini_messages = convert_messages_for_gemini(st.session_state.messages[-5:])  # 直近5つのメッセージのみを使用
-                response = model.generate_content(gemini_messages, stream=True)
-                for chunk in response:
-                    if hasattr(chunk, 'text'):
-                        chunk_text = chunk.text
-                        if chunk_text is not None:
-                            full_response += chunk_text
-                            message_placeholder.markdown(full_response + "▌")
+                response = model.generate_content(gemini_messages)
+                ai_message = {"role": "assistant", "content": [{"text": response.text}]}
 
-            message_placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            st.session_state.messages.append(ai_message)
+
+            for content in ai_message["content"]:
+                if "text" in content:
+                    message_placeholder.markdown(content["text"])
+                if "toolUse" in content:
+                    tool_use = content["toolUse"]
+                    tool_use_id = tool_use["toolUseId"]
+                    name = tool_use["name"]
+                    html = tool_use["input"]["html"]
+                    with main:
+                        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+                        with tab1:
+                            components.html(
+                                html,
+                                height=640,
+                                scrolling=True,
+                            )
+                        with tab2:
+                            st.markdown(f"```html\n{html}\n```")
+                    st.session_state.messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "toolResult": {
+                                        "toolUseId": tool_use_id,
+                                        "content": [{"text": "Done."}],
+                                    }
+                                }
+                            ],
+                        }
+                    )
+                    st.session_state.messages.append({"role": "assistant", "content": [{"text": "OK."}]})
 
             # 会話履歴をFirebaseに保存（最新の会話のみ）
             latest_conversation = st.session_state.messages[-2:]
             
             # 会話の要約タイトルを生成
-            summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content']}\nAI: {latest_conversation[1]['content']}"
+            summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content'][0]['text']}\nAI: {latest_conversation[1]['content'][0]['text']}"
             summary_response = openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": summary_prompt}],
@@ -283,18 +297,9 @@ if prompt := st.chat_input():
             st.error("APIキーを確認し、再試行してください。")
             st.error(f"現在のモデル選択: {model_choice}")
 
-# HTMLコンテンツの表示
-if 'html_content' in st.session_state and st.session_state.html_content:
-    with main:
-        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
-        with tab1:
-            components.html(st.session_state.html_content, height=640, scrolling=True)
-        with tab2:
-            st.code(st.session_state.html_content, language="html")
-
 # 会話履歴のクリアボタン
-if st.button("会話履歴をクリア"):
+if sidebar.button("会話履歴をクリア"):
     st.session_state.messages = [
-        {"role": "system", "content": SYSTEM_PROMPT}
+        {"role": "system", "content": [{"text": SYSTEM_PROMPT}]}
     ]
     st.rerun()
