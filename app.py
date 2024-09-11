@@ -107,13 +107,12 @@ if prompt := st.chat_input():
                 full_response = response.choices[0].message.content
 
             elif model_choice == "Claude 3.5 Sonnet":
-                response = anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=8000,
+                response = anthropic_client.completions.create(
+                    model="claude-3-5",
+                    prompt=prompt,
+                    max_tokens_to_sample=8000,
                 )
-                # Claudeのレスポンス形式に応じて修正
-                full_response = response.completion.text  # completionをtextに修正
+                full_response = response.completion
 
             elif model_choice == "Gemini 1.5 flash":
                 response = genai.GenerativeModel('gemini-1.5-flash').generate_content(prompt)
@@ -139,7 +138,7 @@ if st.session_state.html_content:
         with tab1:
             components.html(st.session_state.html_content, height=640, scrolling=True)
         with tab2:
-            st.code(st.session_state.html_content, language="html")
+            st.markdown(f"```html\n{st.session_state.html_content}\n```")  # ソースコードの表示
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
