@@ -104,10 +104,15 @@ def convert_messages_for_gemini(messages):
     converted = []
     for msg in messages:
         if msg['role'] == 'user':
-            converted.append(genai.types.ContentType.USER_INPUT)
+            converted.append({"role": "user", "parts": [{"text": msg['content']}]})
         elif msg['role'] == 'assistant':
-            converted.append(genai.types.ContentType.AI_RESPONSE)
-        converted.append(msg['content'])
+            converted.append({"role": "model", "parts": [{"text": msg['content']}]})
+        elif msg['role'] == 'system':
+            # システムメッセージは最初のユーザーメッセージに組み込む
+            if converted and converted[0]['role'] == 'user':
+                converted[0]['parts'][0]['text'] = msg['content'] + "\n" + converted[0]['parts'][0]['text']
+            else:
+                converted.insert(0, {"role": "user", "parts": [{"text": msg['content']}]})
     return converted
 
 # 起動時に.envファイルを読み込む
@@ -181,9 +186,11 @@ if prompt := st.chat_input():
                 gemini_messages = convert_messages_for_gemini(st.session_state.messages[-5:])  # 直近5つのメッセージのみを使用
                 response = model.generate_content(gemini_messages, stream=True)
                 for chunk in response:
-                    if chunk.text:
-                        full_response += chunk.text
-                        message_placeholder.markdown(full_response + "▌")
+                    if hasattr(chunk, 'text'):
+                        chunk_text = chunk.text
+                        if chunk_text is not None:
+                            full_response += chunk_text
+                            message_placeholder.markdown(full_response + "▌")
 
             message_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
