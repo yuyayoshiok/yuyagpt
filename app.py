@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
-    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
+    "必ず文章とコードブロックは分けて出力してください。"
 )
 
 # .envファイルの再読み込み関数
@@ -111,7 +111,9 @@ if not openai_api_key or not anthropic_api_key or not gemini_api_key:
 
 # セッション状態の初期化
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
 
 # メインコンテナの設定
 main = st.container()
@@ -123,7 +125,7 @@ model_choice = st.selectbox(
 )
 
 # 過去のメッセージを表示
-for message in st.session_state.messages:
+for message in st.session_state.messages[1:]:  # システムメッセージをスキップ
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
@@ -142,14 +144,11 @@ if prompt := st.chat_input():
             chat_history = db.collection('chat_history').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(20).get()
             context = get_context(prompt, [doc.to_dict() for doc in chat_history])
             
-            # AIプロンプトの作成
-            ai_prompt = f"{SYSTEM_PROMPT}\n\n過去の関連する会話:\n{context}\n\n現在の質問: {prompt}"
-
             # AIモデルにプロンプトを送信し、応答を生成
             if model_choice == "OpenAI GPT-4o-mini":
                 for chunk in openai_client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": ai_prompt}],
+                    messages=st.session_state.messages,
                     stream=True
                 ):
                     if chunk.choices[0].delta.content is not None:
@@ -160,7 +159,7 @@ if prompt := st.chat_input():
                 with anthropic_client.messages.stream(
                     model="claude-3-5-sonnet-20240620",
                     max_tokens=8000,
-                    messages=[{"role": "user", "content": ai_prompt}]
+                    messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
                 ) as stream:
                     for text in stream.text_stream:
                         full_response += text
@@ -168,7 +167,7 @@ if prompt := st.chat_input():
 
             else:  # Gemini 1.5 flash
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(ai_prompt, stream=True)
+                response = model.generate_content(st.session_state.messages[-5:], stream=True)  # 直近5つのメッセージのみを使用
                 for chunk in response:
                     full_response += chunk.text
                     message_placeholder.markdown(full_response + "▌")
@@ -210,5 +209,7 @@ if 'html_content' in st.session_state and st.session_state.html_content:
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
-    st.session_state.messages = []
-    st.experimental_rerun()
+    st.session_state.messages = [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
+    st.rerun()
