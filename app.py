@@ -115,6 +115,12 @@ def convert_messages_for_gemini(messages):
                 converted.insert(0, {"role": "user", "parts": [{"text": msg['content']}]})
     return converted
 
+# Claude用のメッセージ変換関数
+def convert_messages_for_claude(messages):
+    system_message = next((msg['content'] for msg in messages if msg['role'] == 'system'), None)
+    user_assistant_messages = [msg for msg in messages if msg['role'] != 'system']
+    return system_message, user_assistant_messages
+
 # 起動時に.envファイルを読み込む
 reload_env()
 
@@ -172,10 +178,12 @@ if prompt := st.chat_input():
                         message_placeholder.markdown(full_response + "▌")
 
             elif model_choice == "Claude 3.5 Sonnet":
+                system_message, user_assistant_messages = convert_messages_for_claude(st.session_state.messages)
                 with anthropic_client.messages.stream(
                     model="claude-3-5-sonnet-20240620",
                     max_tokens=8000,
-                    messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+                    system=system_message,
+                    messages=user_assistant_messages
                 ) as stream:
                     for text in stream.text_stream:
                         full_response += text
