@@ -78,27 +78,38 @@ def select_relevant_conversations(query, chat_history, top_n=3):
     return [chat_history[i] for i in related_docs_indices]
 
 # コンテキストを取得する関数
+# コンテキストを取得する関数
 def get_context(current_query, chat_history, max_tokens=1000):
     context = []
     total_tokens = 0
-    
+
+    # 過去の関連会話を選択
     relevant_history = select_relevant_conversations(current_query, chat_history)
-    
+
     for conversation in relevant_history:
         summary = conversation['summary_title']
         messages = conversation['messages']
-        
+
         if total_tokens + len(summary.split()) > max_tokens:
             break
-        
+
         context.append(f"過去の関連会話: {summary}")
+
         for msg in messages:
-            if total_tokens + len(msg['content'].split()) > max_tokens:
+            # msg['content']がリストの場合、最初の要素（または適切な要素）を取得して文字列に変換
+            if isinstance(msg['content'], list):
+                message_text = ' '.join(msg['content'])  # リストの内容を結合して文字列にする
+            else:
+                message_text = msg['content']  # 直接文字列の場合はそのまま使用
+
+            if total_tokens + len(message_text.split()) > max_tokens:
                 break
-            context.append(f"{msg['role']}: {msg['content']}")
-            total_tokens += len(msg['content'].split())
-    
+
+            context.append(f"{msg['role']}: {message_text}")
+            total_tokens += len(message_text.split())
+
     return '\n\n'.join(context)
+
 
 # 起動時に.envファイルを読み込む
 reload_env()
