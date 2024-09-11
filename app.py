@@ -48,10 +48,29 @@ def reload_env():
         openai_api_key = st.secrets["openai"]["api_key"]
         anthropic_api_key = st.secrets["anthropic"]["api_key"]
         gemini_api_key = st.secrets["gemini"]["api_key"]
-        dify_api_key = st.secrets["dify"]["api_key"]
-        dify_api_url = st.secrets["dify"]["api_url"]
+        
+        # Difyの設定を取得し、URLとキーが正しいか確認
+        dify_config = st.secrets["dify"]
+        dify_api_key = dify_config["api_key"]
+        dify_api_url = dify_config["api_url"]
+        
+        # URLとキーが逆になっている可能性をチェック
+        if dify_api_key.startswith("http") and not dify_api_url.startswith("http"):
+            dify_api_key, dify_api_url = dify_api_url, dify_api_key
+        
+        # URLの形式チェック
+        if not dify_api_url.startswith("http"):
+            raise ValueError("Dify API URLが正しくありません")
+        
+        # APIキーの簡易チェック（完全な検証は難しいですが、明らかに間違っているものを排除）
+        if len(dify_api_key) < 10:  # 適切な最小長さに調整してください
+            raise ValueError("Dify APIキーが短すぎます")
+        
     except KeyError as e:
         st.error(f"環境変数の設定エラー: {e} が見つかりません。設定を確認してください。")
+        return False
+    except ValueError as e:
+        st.error(f"環境変数の値エラー: {e}")
         return False
     
     global openai_client, anthropic_client
