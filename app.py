@@ -10,8 +10,6 @@ import requests
 from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 # 起動時に.envファイルを読み込む
 load_dotenv()
@@ -37,7 +35,7 @@ SYSTEM_PROMPT = (
 def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path, override=True)
-    
+
     global openai_api_key, anthropic_api_key, gemini_api_key
     openai_api_key = st.secrets["openai"]["api_key"]
     anthropic_api_key = st.secrets["anthropic"]["api_key"]
@@ -48,86 +46,41 @@ def reload_env():
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
 
-# スクレイピングと要約の関数
-def scrape_and_summarize(url):
-    try:
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        paragraphs = soup.find_all('p')
-        content = ' '.join([p.text for p in paragraphs])
-        
-        summary = content[:500] + "..." if len(content) > 500 else content
-        
-        return summary
-    except Exception as e:
-        return f"エラーが発生しました: {str(e)}"
-
-# 関連する過去の会話を選択する関数
-def select_relevant_conversations(query, chat_history, top_n=3):
-    if not chat_history:
-        return []
-
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform([query] + [conv['summary_title'] for conv in chat_history])
-    
-    cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
-    related_docs_indices = cosine_similarities.argsort()[:-top_n-1:-1]
-    
-    return [chat_history[i] for i in related_docs_indices]
-
-# コンテキストを取得する関数
-def get_context(current_query, chat_history, max_tokens=1000):
-    context = []
-    total_tokens = 0
-    
-    relevant_history = select_relevant_conversations(current_query, chat_history)
-    
-    for conversation in relevant_history:
-        summary = conversation['summary_title']
-        messages = conversation['messages']
-        
-        if total_tokens + len(summary.split()) > max_tokens:
-            break
-        
-        context.append(f"過去の関連会話: {summary}")
-        for msg in messages:
-            if isinstance(msg['content'], list):
-                message_text = ' '.join([part['text'] if isinstance(part, dict) and 'text' in part else str(part) for part in msg['content']])
-            else:
-                message_text = msg['content']
-            
-            if total_tokens + len(message_text.split()) > max_tokens:
-                break
-            context.append(f"{msg['role']}: {message_text}")
-            total_tokens += len(message_text.split())
-    
-    return '\n\n'.join(context)
+# HTML表示のためのツール設定
+tools = {
+    "toolSpec": {
+        "name": "html_viewer",
+        "description": "HTMLを表示します。",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "HTML Document"}
+                },
+                "required": ["html"],
+            }
+        },
+    }
+}
 
 # 起動時に.envファイルを読み込む
 reload_env()
 
-st.title("YuyaGPT")
-
-# APIキーが正しく取得できたか確認
-if not openai_api_key or not anthropic_api_key or not gemini_api_key:
-    st.error("APIキーが正しく設定されていません。.envファイルを確認してください。")
-    st.stop()
+st.title("YuyaGPT with HTML Preview")
 
 # セッション状態の初期化
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
 if "html_content" not in st.session_state:
     st.session_state.html_content = None  # 初期化
+
+# メインコンテナの設定
+main = st.container()
 
 # 過去の会話履歴を表示する部分
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.write(message["content"])
-
-# メインコンテナの設定
-main = st.container()
 
 # モデル選択のプルダウン
 model_choice = st.selectbox(
@@ -145,68 +98,36 @@ if prompt := st.chat_input():
         full_response = ""
 
         try:
-            # 過去の関連する会話のコンテキストを取得
-            chat_history = db.collection('chat_history').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(20).get()
-            context = get_context(prompt, [doc.to_dict() for doc in chat_history])
-            
-            # AIプロンプトの作成
-            ai_prompt = f"{SYSTEM_PROMPT}\n\n過去の関連する会話:\n{context}\n\n現在の質問: {prompt}"
-
-            # AIモデルにプロンプトを送信し、応答を生成
+            # OpenAI、AnthropicまたはGeminiを使用して応答を生成
             if model_choice == "OpenAI GPT-4o-mini":
-                for chunk in openai_client.chat.completions.create(
+                response = openai_client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": ai_prompt}],
-                    stream=True
-                ):
-                    if chunk.choices[0].delta.content is not None:
-                        full_response += chunk.choices[0].delta.content
-                        message_placeholder.markdown(full_response + "▌")
-
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                full_response = response.choices[0].message["content"]
             elif model_choice == "Claude 3.5 Sonnet":
-                with anthropic_client.messages.stream(
+                response = anthropic_client.messages.create(
                     model="claude-3-5-sonnet-20240620",
+                    messages=[{"role": "user", "content": prompt}],
                     max_tokens=8000,
-                    messages=[{"role": "user", "content": ai_prompt}]
-                ) as stream:
-                    for text in stream.text_stream:
-                        full_response += text
-                        message_placeholder.markdown(full_response + "▌")
+                )
+                full_response = response.completion
+            elif model_choice == "Gemini 1.5 flash":
+                response = genai.GenerativeModel('gemini-1.5-flash').generate_content(prompt)
+                full_response = response.text
 
-            else:  # Gemini 1.5 flash
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(ai_prompt, stream=True)
-                for chunk in response:
-                    full_response += chunk.text
-                    message_placeholder.markdown(full_response + "▌")
-
+            # 応答を表示
             message_placeholder.markdown(full_response)
-            st.session_state.chat_history.append({"role": "assistant", "content": full_response})  # 会話履歴に追加
+            st.session_state.chat_history.append({"role": "assistant", "content": full_response})
 
-            # 会話履歴をFirebaseに保存（最新の会話のみ）
-            latest_conversation = st.session_state.chat_history[-2:]
-            
-            # 会話の要約タイトルを生成
-            summary_prompt = f"以下の会話を5単語以内で要約してタイトルを作成してください：\nユーザー: {latest_conversation[0]['content']}\nAI: {latest_conversation[1]['content']}"
-            summary_response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": summary_prompt}],
-                max_tokens=10
-            )
-            summary_title = summary_response.choices[0].message.content.strip()
-            
-            db.collection('chat_history').add({
-                'messages': latest_conversation,
-                'summary_title': summary_title,
-                'timestamp': firestore.SERVER_TIMESTAMP
-            })
+            # HTMLプレビューとソースコードを出力
+            if "HTML" in full_response or "html" in full_response:
+                st.session_state.html_content = full_response  # HTMLの保存
 
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
-            st.error("APIキーを確認し、再試行してください。")
-            st.error(f"現在のモデル選択: {model_choice}")
 
-# HTMLコンテンツの表示
+# HTMLコンテンツの表示（プレビューとソースコード）
 if st.session_state.html_content:
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
@@ -218,9 +139,5 @@ if st.session_state.html_content:
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.chat_history = []
-    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
-
-# ページの再読み込み処理
-if 'reload_page' in st.session_state and st.session_state.reload_page:
-    st.session_state.reload_page = False
+    st.session_state.html_content = None  # HTMLもクリア
     st.experimental_rerun()
