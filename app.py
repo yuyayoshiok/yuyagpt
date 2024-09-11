@@ -246,8 +246,7 @@ if prompt := st.chat_input():
                     model="claude-3-5-sonnet-20240620",
                     max_tokens=8000,
                     system=system_message,
-                    messages=user_assistant_messages,
-                    tools=[html_viewer_tool]
+                    messages=user_assistant_messages
                 )
                 ai_message = {"role": "assistant", "content": [{"text": response.content[0].text}] if response.content else []}
 
