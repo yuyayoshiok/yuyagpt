@@ -92,15 +92,22 @@ def get_context(current_query, chat_history, max_tokens=1000):
         summary = conversation['summary_title']
         messages = conversation['messages']
         
-        if total_tokens + len(summary.split()) > max_tokens:
-            break
-        
-        context.append(f"過去の関連会話: {summary}")
-        for msg in messages:
-            if total_tokens + len(msg['content'].split()) > max_tokens:
+        # summaryが文字列であることを確認
+        if isinstance(summary, str):
+            if total_tokens + len(summary.split()) > max_tokens:
                 break
-            context.append(f"{msg['role']}: {msg['content']}")
-            total_tokens += len(msg['content'].split())
+            
+            context.append(f"過去の関連会話: {summary}")
+            total_tokens += len(summary.split())
+        
+        for msg in messages:
+            content = msg.get('content', '')
+            # contentが文字列であることを確認
+            if isinstance(content, str):
+                if total_tokens + len(content.split()) > max_tokens:
+                    break
+                context.append(f"{msg['role']}: {content}")
+                total_tokens += len(content.split())
     
     return '\n\n'.join(context)
 
