@@ -141,12 +141,11 @@ def get_context(current_query, chat_history, max_tokens=1000):
 
 # Cohereを使用した会話機能（ストリーミング対応）
 def cohere_chat_stream(prompt):
-    response = co.chat(
+    response = co.chat_stream(
         model="command-r-plus-08-2024",
         message=prompt,
         temperature=0.5,
-        max_tokens=5000,
-        stream=True
+        max_tokens=5000
     )
     for event in response:
         if event.event_type == "text-generation":
