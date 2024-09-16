@@ -10,3 +10,4 @@
    streamlit
    chardet
    cohere
+   groq

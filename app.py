@@ -6,6 +6,7 @@ from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
 import cohere
+from groq import Groq
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -41,17 +42,19 @@ def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path, override=True)
     
-    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key
+    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key, groq_api_key
     openai_api_key = st.secrets["openai"]["api_key"]
     anthropic_api_key = st.secrets["anthropic"]["api_key"]
     gemini_api_key = st.secrets["gemini"]["api_key"]
     cohere_api_key = st.secrets["cohere"]["api_key"]
+    groq_api_key = st.secrets["groq"]["api_key"]
     
-    global openai_client, anthropic_client, co
+    global openai_client, anthropic_client, co, groq_client
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
     co = cohere.Client(cohere_api_key)
+    groq_client = Groq(api_key=groq_api_key)
 
 # スクレイピングと要約の関数
 def scrape_and_summarize(url):
@@ -107,13 +110,27 @@ def cohere_chat(prompt):
     )
     return response.text
 
+# Groqを使用した会話機能
+def groq_chat(prompt):
+    chat_history = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt}
+    ]
+    response = groq_client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=chat_history,
+        max_tokens=5000,
+        temperature=0.5
+    )
+    return response.choices[0].message.content
+
 # 起動時に.envファイルを読み込む
 reload_env()
 
 st.title("YuyaGPT")
 
 # APIキーが正しく取得できたか確認
-if not openai_api_key or not anthropic_api_key or not gemini_api_key or not cohere_api_key:
+if not openai_api_key or not anthropic_api_key or not gemini_api_key or not cohere_api_key or not groq_api_key:
     st.error("APIキーが正しく設定されていません。.envファイルを確認してください。")
     st.stop()
 
@@ -129,7 +146,7 @@ main = st.container()
 # モデル選択のプルダウン
 model_choice = st.selectbox(
     "モデルを選択してください",
-    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus"]
+    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq llama3-70b-8192"]
 )
 
 # 現在の会話を表示
@@ -183,8 +200,12 @@ if prompt := st.chat_input():
                     full_response += chunk.text
                     message_placeholder.markdown(full_response + "▌")
 
-            else:  # Cohere Command-R Plus
+            elif model_choice == "Cohere Command-R Plus":
                 full_response = cohere_chat(ai_prompt)
+                message_placeholder.markdown(full_response)
+
+            else:  # Groq llama3-70b-8192
+                full_response = groq_chat(ai_prompt)
                 message_placeholder.markdown(full_response)
 
             message_placeholder.markdown(full_response)
