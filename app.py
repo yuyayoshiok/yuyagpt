@@ -5,6 +5,7 @@ import streamlit.components.v1 as components
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
+import cohere
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -12,16 +13,15 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import json
+import time
 
 # 起動時に.envファイルを読み込む
-load_dotenv()  # .envファイルの内容を環境変数としてロードする
+load_dotenv()
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    # Firebaseのシークレット情報をst.secretsから取得してJSON形式に変換
     firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
-    
-    # Firebase認証情報を使ってアプリを初期化
     cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
 
@@ -41,75 +41,71 @@ def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path, override=True)
     
-    global openai_api_key, anthropic_api_key, gemini_api_key
+    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key
     openai_api_key = st.secrets["openai"]["api_key"]
     anthropic_api_key = st.secrets["anthropic"]["api_key"]
     gemini_api_key = st.secrets["gemini"]["api_key"]
+    cohere_api_key = st.secrets["cohere"]["api_key"]
     
-    global openai_client, anthropic_client
+    global openai_client, anthropic_client, co
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
+    co = cohere.Client(cohere_api_key)
 
 # スクレイピングと要約の関数
 def scrape_and_summarize(url):
     try:
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # 本文の取得（単純化のため、pタグのテキストのみを取得）
         paragraphs = soup.find_all('p')
         content = ' '.join([p.text for p in paragraphs])
-        
-        # 内容の要約（ここでは簡単な要約として最初の500文字を使用）
         summary = content[:500] + "..." if len(content) > 500 else content
-        
         return summary
     except Exception as e:
         return f"エラーが発生しました: {str(e)}"
 
 # 関連する過去の会話を選択する関数
 def select_relevant_conversations(query, chat_history, top_n=3):
-    if not chat_history:  # チャット履歴が空の場合
+    if not chat_history:
         return []
-
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform([query] + [conv['summary_title'] for conv in chat_history])
-    
     cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
     related_docs_indices = cosine_similarities.argsort()[:-top_n-1:-1]
-    
     return [chat_history[i] for i in related_docs_indices]
 
 # コンテキストを取得する関数
 def get_context(current_query, chat_history, max_tokens=1000):
     context = []
     total_tokens = 0
-    
     relevant_history = select_relevant_conversations(current_query, chat_history)
-    
     for conversation in relevant_history:
         summary = conversation['summary_title']
         messages = conversation['messages']
-        
-        # summaryが文字列であることを確認
         if isinstance(summary, str):
             if total_tokens + len(summary.split()) > max_tokens:
                 break
-            
             context.append(f"過去の関連会話: {summary}")
             total_tokens += len(summary.split())
-        
         for msg in messages:
             content = msg.get('content', '')
-            # contentが文字列であることを確認
             if isinstance(content, str):
                 if total_tokens + len(content.split()) > max_tokens:
                     break
                 context.append(f"{msg['role']}: {content}")
                 total_tokens += len(content.split())
-    
     return '\n\n'.join(context)
+
+# Cohereを使用した会話機能
+def cohere_chat(prompt):
+    response = co.chat(
+        model="command-r-plus-08-2024",
+        message=prompt,
+        temperature=0.7,
+        max_tokens=500
+    )
+    return response.text
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -117,7 +113,7 @@ reload_env()
 st.title("YuyaGPT")
 
 # APIキーが正しく取得できたか確認
-if not openai_api_key or not anthropic_api_key or not gemini_api_key:
+if not openai_api_key or not anthropic_api_key or not gemini_api_key or not cohere_api_key:
     st.error("APIキーが正しく設定されていません。.envファイルを確認してください。")
     st.stop()
 
@@ -133,7 +129,7 @@ main = st.container()
 # モデル選択のプルダウン
 model_choice = st.selectbox(
     "モデルを選択してください",
-    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash"]
+    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus"]
 )
 
 # 現在の会話を表示
@@ -180,12 +176,16 @@ if prompt := st.chat_input():
                         full_response += text
                         message_placeholder.markdown(full_response + "▌")
 
-            else:  # Gemini 1.5 flash
+            elif model_choice == "Gemini 1.5 flash":
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 response = model.generate_content(ai_prompt, stream=True)
                 for chunk in response:
                     full_response += chunk.text
                     message_placeholder.markdown(full_response + "▌")
+
+            else:  # Cohere Command-R Plus
+                full_response = cohere_chat(ai_prompt)
+                message_placeholder.markdown(full_response)
 
             message_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
@@ -239,5 +239,4 @@ if st.button("会話履歴をクリア"):
 # ページの再読み込み処理
 if 'reload_page' in st.session_state and st.session_state.reload_page:
     st.session_state.reload_page = False
-    # {{ edit_1 }}: st.experimental_rerun()を削除し、セッション状態を使用
-    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
+    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
