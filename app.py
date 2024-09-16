@@ -16,7 +16,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
 import time
-import asyncio
 
 # 起動時に.envファイルを読み込む
 load_dotenv()
@@ -36,6 +35,45 @@ SYSTEM_PROMPT = (
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
     "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
+)
+
+import os
+from dotenv import load_dotenv
+import streamlit as st
+import streamlit.components.v1 as components
+from openai import OpenAI
+from anthropic import Anthropic
+import google.generativeai as genai
+import cohere
+from groq import Groq
+import requests
+from bs4 import BeautifulSoup
+import re
+import firebase_admin
+from firebase_admin import credentials, firestore
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import json
+import time
+
+# 起動時に.envファイルを読み込む
+load_dotenv()
+
+# Firebaseの初期化
+if not firebase_admin._apps:
+    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    cred = credentials.Certificate(firebase_credentials)
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
+
+# システムプロンプトの定義
+SYSTEM_PROMPT = (
+    "あなたはプロのエンジニアでありプログラマーです。"
+    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
+    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
+    "チャットでは日本語で応対してください。"
+    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
 )
 
 # .envファイルの再読み込み関数
@@ -102,11 +140,11 @@ def get_context(current_query, chat_history, max_tokens=1000):
     return '\n\n'.join(context)
 
 # Cohereを使用した会話機能（ストリーミング対応）
-async def cohere_chat_stream(prompt):
+def cohere_chat_stream(prompt):
     response = co.chat(
         model="command-r-plus-08-2024",
         message=prompt,
-        temperature=0.7,
+        temperature=0.5,
         max_tokens=5000,
         stream=True
     )
@@ -115,7 +153,7 @@ async def cohere_chat_stream(prompt):
             yield event.text
 
 # Groqを使用した会話機能（ストリーミング対応）
-async def groq_chat_stream(prompt):
+def groq_chat_stream(prompt):
     chat_history = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt}
@@ -214,16 +252,14 @@ if prompt := st.chat_input():
                     message_placeholder.markdown(full_response + "▌")
 
             elif model_choice == "Cohere Command-R Plus":
-                async for chunk in cohere_chat_stream(ai_prompt):
+                for chunk in cohere_chat_stream(ai_prompt):
                     full_response += chunk
                     message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
 
             else:  # Groq llama3-70b-8192
-                async for chunk in groq_chat_stream(ai_prompt):
+                for chunk in groq_chat_stream(ai_prompt):
                     full_response += chunk
                     message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
 
             message_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
@@ -274,9 +310,4 @@ if st.button("会話履歴をクリア"):
     st.session_state.html_content = None
     clear_firebase_documents()  # Firebaseのドキュメントを削除
     st.success("会話履歴とFirebaseのドキュメントが削除されました。")
-    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
-
-# ページの再読み込み処理
-if 'reload_page' in st.session_state and st.session_state.reload_page:
-    st.session_state.reload_page = False
-    st.rerun()
+    st.rerun()  # ページを再読み込み
