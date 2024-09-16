@@ -145,7 +145,7 @@ def cohere_chat_stream(prompt):
         model="command-r-plus-08-2024",
         message=prompt,
         temperature=0.5,
-        max_tokens=5000
+        max_tokens=4096
     )
     for event in response:
         if event.event_type == "text-generation":
