@@ -16,6 +16,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
 import time
+import asyncio
 
 # 起動時に.envファイルを読み込む
 load_dotenv()
@@ -34,7 +35,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
-    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
+    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
 )
 
 # .envファイルの再読み込み関数
@@ -53,7 +54,7 @@ def reload_env():
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
-    co = cohere.Client(cohere_api_key)
+    co = cohere.Client(api_key=cohere_api_key)
     groq_client = Groq(api_key=groq_api_key)
 
 # スクレイピングと要約の関数
@@ -100,18 +101,21 @@ def get_context(current_query, chat_history, max_tokens=1000):
                 total_tokens += len(content.split())
     return '\n\n'.join(context)
 
-# Cohereを使用した会話機能
-def cohere_chat(prompt):
+# Cohereを使用した会話機能（ストリーミング対応）
+async def cohere_chat_stream(prompt):
     response = co.chat(
         model="command-r-plus-08-2024",
         message=prompt,
         temperature=0.7,
-        max_tokens=5000
+        max_tokens=5000,
+        stream=True
     )
-    return response.text
+    for event in response:
+        if event.event_type == "text-generation":
+            yield event.text
 
-# Groqを使用した会話機能
-def groq_chat(prompt):
+# Groqを使用した会話機能（ストリーミング対応）
+async def groq_chat_stream(prompt):
     chat_history = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt}
@@ -120,9 +124,18 @@ def groq_chat(prompt):
         model="llama3-70b-8192",
         messages=chat_history,
         max_tokens=5000,
-        temperature=0.5
+        temperature=0.5,
+        stream=True
     )
-    return response.choices[0].message.content
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            yield chunk.choices[0].delta.content
+
+# Firebaseのドキュメントを全て削除する関数
+def clear_firebase_documents():
+    docs = db.collection('chat_history').get()
+    for doc in docs:
+        doc.reference.delete()
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -146,7 +159,7 @@ main = st.container()
 # モデル選択のプルダウン
 model_choice = st.selectbox(
     "モデルを選択してください",
-    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq llama3-70b-8192"]
+    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
 )
 
 # 現在の会話を表示
@@ -201,11 +214,15 @@ if prompt := st.chat_input():
                     message_placeholder.markdown(full_response + "▌")
 
             elif model_choice == "Cohere Command-R Plus":
-                full_response = cohere_chat(ai_prompt)
+                async for chunk in cohere_chat_stream(ai_prompt):
+                    full_response += chunk
+                    message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
 
             else:  # Groq llama3-70b-8192
-                full_response = groq_chat(ai_prompt)
+                async for chunk in groq_chat_stream(ai_prompt):
+                    full_response += chunk
+                    message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
 
             message_placeholder.markdown(full_response)
@@ -255,9 +272,11 @@ if st.session_state.html_content:
 if st.button("会話履歴をクリア"):
     st.session_state.messages = []
     st.session_state.html_content = None
+    clear_firebase_documents()  # Firebaseのドキュメントを削除
+    st.success("会話履歴とFirebaseのドキュメントが削除されました。")
     st.session_state.reload_page = True  # ページの再読み込みフラグを設定
 
 # ページの再読み込み処理
 if 'reload_page' in st.session_state and st.session_state.reload_page:
     st.session_state.reload_page = False
-    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
+    st.rerun()
