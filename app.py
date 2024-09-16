@@ -106,7 +106,7 @@ def cohere_chat(prompt):
         model="command-r-plus-08-2024",
         message=prompt,
         temperature=0.7,
-        max_tokens=500
+        max_tokens=5000
     )
     return response.text
 
