@@ -14,27 +14,16 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import cohere
 from groq import Groq
+from streamlit_custom_login import login_page, logout
 
 # 起動時に.envファイルを読み込む
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    try:
-        firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
-        cred = credentials.Certificate(firebase_credentials)
-        firebase_admin.initialize_app(cred)
-    except json.JSONDecodeError as e:
-        st.error(f"Firebase認証情報のJSONデコードに失敗しました: {str(e)}")
-        st.error("認証情報を確認してください。")
-        st.stop()
-    except KeyError as e:
-        st.error(f"Firebase認証情報が見つかりません: {str(e)}")
-        st.error("環境変数またはStreamlit Secretsを確認してください。")
-        st.stop()
-    except Exception as e:
-        st.error(f"Firebaseの初期化中にエラーが発生しました: {str(e)}")
-        st.stop()
+    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    cred = credentials.Certificate(firebase_credentials)
+    firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
@@ -44,7 +33,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
-    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
+    "また、ユーザーを褒めるのも得意で、褒めて伸ばすタイプのエンジニアでありプログラマーです。"
 )
 
 # .envファイルの再読み込み関数
@@ -122,32 +111,13 @@ co = cohere.Client(st.secrets["cohere"]["api_key"])
 # Groqクライアントの初期化
 groq_client = Groq(api_key=st.secrets["groq"]["api_key"])
 
-# ログイン機能の実装
-def login():
-    username = st.text_input("ユーザー名")
-    password = st.text_input("パスワード", type="password")
-    if st.button("ログイン"):
-        # ここで実際の認証ロジックを実装します
-        # 例: if username == "admin" and password == "password":
-        if username and password:  # 簡単な例として、何か入力されていればログイン成功とします
-            st.session_state.logged_in = True
-            st.success("ログインに成功しました！")
-            st.experimental_rerun()
-        else:
-            st.error("ログインに失敗しました。")
-
-# ログアウト機能の実装
-def logout():
-    st.session_state.logged_in = False
-    st.success("ログアウトしました。")
-    st.experimental_rerun()
-
-# メインのアプリケーションコード
+# ログイン状態の確認
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
+# ログインページの表示
 if not st.session_state.logged_in:
-    login()
+    login_page()
 else:
     # サイドバーの設定
     with st.sidebar:
@@ -257,7 +227,7 @@ else:
         for doc in chat_history:
             data = doc.to_dict()
             if st.button(data['summary_title'], key=doc.id):
-                # 選���された歴を表示
+                # 選択された履歴を表示
                 for message in data['messages']:
                     st.chat_message(message['role']).write(message['content'])
 
@@ -306,4 +276,4 @@ if st.button("会話履歴をクリア"):
 
 # ページの再読み込み処理
 if 'reload_page' in st.session_state and st.session_state.reload_page:
-    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
+    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
