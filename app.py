@@ -250,6 +250,15 @@ if prompt := st.chat_input("質問を入力してください"):
             st.error(f"エラーが発生しました: {str(e)}")
             message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
 
+# HTMLコンテンツの表示
+if st.session_state.html_content:
+    with main:
+        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+        with tab1:
+            components.html(st.session_state.html_content, height=640, scrolling=True)
+        with tab2:
+            st.code(st.session_state.html_content, language="html")
+
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.memory.clear()
