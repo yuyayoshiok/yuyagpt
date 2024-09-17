@@ -21,14 +21,14 @@ load_dotenv()  # .envファイルの内容を環境変数としてロードす�
 # Firebaseの初期化
 if not firebase_admin._apps:
     try:
-        firebase_credentials = json.loads(st.secrets['firebase']['credentials'])
+        firebase_credentials = json.loads(os.getenv('FIREBASE_CREDENTIALS') or st.secrets['FIREBASE']['CREDENTIALS_JSON'])
         cred = credentials.Certificate(firebase_credentials)
         firebase_admin.initialize_app(cred)
     except json.JSONDecodeError:
         st.error("Firebase認証情報のJSONデコードに失敗しました。認証情報を確認してください。")
         st.stop()
     except KeyError:
-        st.error("Firebase認証情報が見つかりません。Streamlit Secretsを確認してください。")
+        st.error("Firebase認証情報が見つかりません。環境変数またはStreamlit Secretsを確認してください。")
         st.stop()
 
 db = firestore.client()
@@ -252,7 +252,7 @@ else:
         for doc in chat_history:
             data = doc.to_dict()
             if st.button(data['summary_title'], key=doc.id):
-                # 選択された履歴を表示
+                # 選択された���歴を表示
                 for message in data['messages']:
                     st.chat_message(message['role']).write(message['content'])
 
