@@ -34,6 +34,13 @@ SYSTEM_PROMPT = (
     "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
 )
 
+# APIキーの検証
+def validate_api_keys():
+    if not st.secrets["openai"]["api_key"]:
+        st.error("OpenAI APIキーが設定されていません。")
+        return False
+    # 他のAPIキーの検証も同様に追加
+    return True
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -134,50 +141,59 @@ def generate_response(ai_prompt, model_choice, memory):
     chat_history = memory.chat_memory.messages
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + chat_history + [HumanMessage(content=ai_prompt)]
 
-    if model_choice == "OpenAI GPT-4o-mini":
-        for chunk in openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": m.type, "content": m.content} for m in messages],
-            stream=True
-        ):
-            if chunk.choices[0].delta.content is not None:
-                full_response += chunk.choices[0].delta.content
+    try:
+        if model_choice == "OpenAI GPT-4o-mini":
+            for chunk in openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": m.type, "content": m.content} for m in messages],
+                stream=True
+            ):
+                if chunk.choices[0].delta.content is not None:
+                    full_response += chunk.choices[0].delta.content
+                    yield full_response
+
+        elif model_choice == "Claude 3.5 Sonnet":
+            with anthropic_client.messages.stream(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=8000,
+                messages=[{"role": m.type, "content": m.content} for m in messages]
+            ) as stream:
+                for text in stream.text_stream:
+                    full_response += text
+                    yield full_response
+
+        elif model_choice == "Gemini 1.5 flash":
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content([m.content for m in messages], stream=True)
+            for chunk in response:
+                full_response += chunk.text
                 yield full_response
 
-    elif model_choice == "Claude 3.5 Sonnet":
-        with anthropic_client.messages.stream(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=8000,
-            messages=[{"role": m.type, "content": m.content} for m in messages]
-        ) as stream:
-            for text in stream.text_stream:
-                full_response += text
+        elif model_choice == "Cohere Command-R Plus":
+            for chunk in cohere_chat_stream(ai_prompt):
+                full_response += chunk
                 yield full_response
 
-    elif model_choice == "Gemini 1.5 flash":
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content([m.content for m in messages], stream=True)
-        for chunk in response:
-            full_response += chunk.text
-            yield full_response
+        else:  # Groq llama3-70b-8192
+            for chunk in groq_chat_stream(ai_prompt):
+                full_response += chunk
+                yield full_response
 
-    elif model_choice == "Cohere Command-R Plus":
-        for chunk in cohere_chat_stream(ai_prompt):
-            full_response += chunk
-            yield full_response
+        # 会話履歴に応答を追加
+        memory.chat_memory.add_ai_message(full_response)
 
-    else:  # Groq llama3-70b-8192
-        for chunk in groq_chat_stream(ai_prompt):
-            full_response += chunk
-            yield full_response
-
-    # 会話履歴に応答を追加
-    memory.chat_memory.add_ai_message(full_response)
+    except Exception as e:
+        st.error(f"エラーが発生しました: {str(e)}")
+        yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
 
 # 起動時に.envファイルを読み込む
 reload_env()
 
 st.title("YuyaGPT")
+
+# APIキーの検証
+if not validate_api_keys():
+    st.stop()
 
 # PDFファイルのアップロード
 uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type="pdf")
@@ -209,8 +225,12 @@ if prompt := st.chat_input("質問を入力してください"):
     # AI応答の生成
     with st.chat_message("ai"):
         message_placeholder = st.empty()
-        for response in generate_response(prompt, model_choice, st.session_state.memory):
-            message_placeholder.markdown(response)
+        try:
+            for response in generate_response(prompt, model_choice, st.session_state.memory):
+                message_placeholder.markdown(response)
+        except Exception as e:
+            st.error(f"エラーが発生しました: {str(e)}")
+            message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
