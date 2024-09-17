@@ -20,9 +20,6 @@ import streamlit_authenticator as stauth
 import yaml
 import bcrypt
 
-# 起動時に.envファイルを読み込む
-load_dotenv()
-
 # Firebaseの初期化
 if not firebase_admin._apps:
     firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
