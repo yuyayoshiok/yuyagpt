@@ -175,6 +175,37 @@ def display_html_preview(html_content):
     html_data_url = get_html_data_url(html_content)
     components.iframe(html_data_url, height=600, scrolling=True)
 
+# Cohereを使用した会話機能（ストリーミング対応）
+def cohere_chat_stream(prompt):
+    chat_history = [m.content for m in st.session_state.memory.chat_memory.messages]
+    response = co.chat(
+        model='command-r-plus-08-2024',
+        message=prompt,
+        temperature=0.5,
+        chat_history=chat_history,
+        stream=True
+    )
+    for event in response:
+        if event.event_type == "text-generation":
+            yield event.text
+
+# Groqを使用した会話機能（ストリーミング対応）
+def groq_chat_stream(prompt):
+    chat_history = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt}
+    ]
+    response = groq_client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=chat_history,
+        max_tokens=5000,
+        temperature=0.5,
+        stream=True
+    )
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            yield chunk.choices[0].delta.content
+
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(prompt, model_choice, memory):
     url = detect_url(prompt)
