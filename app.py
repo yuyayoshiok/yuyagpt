@@ -232,19 +232,23 @@ if uploaded_file:
             st.markdown(message["content"])
 
     # ユーザー入力の処理
-    if prompt := st.chat_input("質問を入力してください"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    user_input = st.text_input("質問を入力してください", key="user_input")  # ここで st.text_input を使用
+
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_input)
 
         # AI応答の生成
         with st.chat_message("assistant"):
             with st.spinner("思考中..."):
-                response = chain.run({"question": prompt})
+                response = chain.run({"question": user_input})
                 st.markdown(response)
 
         # 会話履歴に保存
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
