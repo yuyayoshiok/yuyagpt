@@ -2,7 +2,6 @@ import os
 import tempfile
 from dotenv import load_dotenv
 import streamlit as st
-import streamlit.components.v1 as components
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
@@ -31,6 +30,7 @@ SYSTEM_PROMPT = (
     "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
     "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
     "チャットでは日本語で応対してください。"
+    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
 )
 
 # .envファイルの再読み込み関数
@@ -95,6 +95,7 @@ def get_context(current_query, chat_history, max_tokens=1000):
                 context.append(f"{msg['role']}: {content}")
                 total_tokens += len(content.split())
     return '\n\n'.join(context)
+
 
 # Cohereを使用した会話機能（ストリーミング対応）
 def cohere_chat_stream(prompt):
@@ -166,6 +167,8 @@ def generate_response(ai_prompt, model_choice, message_placeholder):
             full_response += chunk
             message_placeholder.markdown(full_response + "▌")
 
+    # 最終的な応答を表示し、"▌"を取り除く
+    message_placeholder.markdown(full_response)
     return full_response
 
 # 起動時に.envファイルを読み込む
@@ -196,22 +199,20 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# ユーザー入力の処理
-user_input = st.text_input("質問を入力してください")  # 確実にテキストボックスが表示されるように修正
-
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
+# ユーザー入力の処理（Streamlitの`st.chat_input()`を使用）
+if prompt := st.chat_input("質問を入力してください"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(user_input)
+        st.markdown(prompt)
 
     # AI応答の生成
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        full_response = generate_response(user_input, model_choice, message_placeholder)
+        full_response = generate_response(prompt, model_choice, message_placeholder)
         st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.messages = []
     st.session_state.memory.clear()
-    st.experimental_rerun()  # エラーを避けるため、この行を削除するか、別の状態リセット処理に置き換える
+    st.experimental_rerun()  # ページを再読み込みして状態をリセット
