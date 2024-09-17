@@ -1,3 +1,4 @@
+import json
 import os
 from dotenv import load_dotenv
 import streamlit as st
@@ -5,20 +6,15 @@ import streamlit.components.v1 as components
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
-import cohere
-from groq import Groq
 import requests
 from bs4 import BeautifulSoup
-import re
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, auth  # Firebase Authenticationをインポート
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import json
-import time
-import streamlit_authenticator as stauth
-import yaml
-import bcrypt
+
+# 起動時に.envファイルを読み込む
+load_dotenv()  # .envファイルの内容を環境変数としてロードする
 
 # Firebaseの初期化
 if not firebase_admin._apps:
@@ -28,161 +24,122 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# システムプロンプトの定義
-SYSTEM_PROMPT = (
-    "あなたはプロのエンジニアでありプログラマーです。"
-    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
-    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
-    "チャットでは日本語で応対してください。"
-    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
-)
+# 許可されたメールアドレスのリスト
+ALLOWED_EMAILS = ["yuyayoshiok@gmail.com"]  # 許可するメールアドレスを追加
+
+# ログイン認証の関数
+def login(email, password):
+    try:
+        user = auth.get_user_by_email(email)
+        # パスワードの検証（Firebaseでは直接パスワードを検証できないため、別途実装が必要）
+        # ここでは簡略化のため、パスワードが"password"であると仮定
+        if user and password == "password" and email in ALLOWED_EMAILS:
+            return True
+        else:
+            return False
+    except Exception as e:
+        return False
 
 # .envファイルの再読み込み関数
 def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path, override=True)
     
-    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key, groq_api_key
+    global openai_api_key, anthropic_api_key, gemini_api_key
     openai_api_key = st.secrets["openai"]["api_key"]
     anthropic_api_key = st.secrets["anthropic"]["api_key"]
     gemini_api_key = st.secrets["gemini"]["api_key"]
-    cohere_api_key = st.secrets["cohere"]["api_key"]
-    groq_api_key = st.secrets["groq"]["api_key"]
     
-    global openai_client, anthropic_client, co, groq_client
+    global openai_client, anthropic_client
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
-    co = cohere.Client(api_key=cohere_api_key)
-    groq_client = Groq(api_key=groq_api_key)
 
 # スクレイピングと要約の関数
 def scrape_and_summarize(url):
     try:
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
+        
         paragraphs = soup.find_all('p')
         content = ' '.join([p.text for p in paragraphs])
+        
         summary = content[:500] + "..." if len(content) > 500 else content
+        
         return summary
     except Exception as e:
         return f"エラーが発生しました: {str(e)}"
 
 # 関連する過去の会話を選択する関数
 def select_relevant_conversations(query, chat_history, top_n=3):
-    if not chat_history:
+    if not chat_history:  # チャット履歴が空の場合
         return []
+
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform([query] + [conv['summary_title'] for conv in chat_history])
+    
     cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
     related_docs_indices = cosine_similarities.argsort()[:-top_n-1:-1]
+    
     return [chat_history[i] for i in related_docs_indices]
 
 # コンテキストを取得する関数
 def get_context(current_query, chat_history, max_tokens=1000):
     context = []
     total_tokens = 0
+    
     relevant_history = select_relevant_conversations(current_query, chat_history)
+    
     for conversation in relevant_history:
         summary = conversation['summary_title']
         messages = conversation['messages']
-        if isinstance(summary, str):
-            if total_tokens + len(summary.split()) > max_tokens:
-                break
-            context.append(f"過去の関連会話: {summary}")
-            total_tokens += len(summary.split())
+        
+        if total_tokens + len(summary.split()) > max_tokens:
+            break
+        
+        context.append(f"過去の関連会話: {summary}")
         for msg in messages:
-            content = msg.get('content', '')
-            if isinstance(content, str):
-                if total_tokens + len(content.split()) > max_tokens:
-                    break
-                context.append(f"{msg['role']}: {content}")
-                total_tokens += len(content.split())
+            if total_tokens + len(msg['content'].split()) > max_tokens:
+                break
+            context.append(f"{msg['role']}: {msg['content']}")
+            total_tokens += len(msg['content'].split())
+    
     return '\n\n'.join(context)
-
-# Cohereを使用した会話機能（ストリーミング対応）
-def cohere_chat_stream(prompt):
-    response = co.chat_stream(
-        model="command-r-plus-08-2024",
-        message=prompt,
-        temperature=0.5,
-        max_tokens=4096
-    )
-    for event in response:
-        if event.event_type == "text-generation":
-            yield event.text
-
-# Groqを使用した会話機能（ストリーミング対応）
-def groq_chat_stream(prompt):
-    chat_history = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt}
-    ]
-    response = groq_client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=chat_history,
-        max_tokens=5000,
-        temperature=0.5,
-        stream=True
-    )
-    for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            yield chunk.choices[0].delta.content
-
-# Firebaseのドキュメントを全て削除する関数
-def clear_firebase_documents():
-    docs = db.collection('chat_history').get()
-    for doc in docs:
-        doc.reference.delete()
 
 # 起動時に.envファイルを読み込む
 reload_env()
 
-# 認証設定の読み込み
-with open('secret.toml') as file:
-    config = yaml.safe_load(file)
+# セッション状態の初期化
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days'],
-    config['preauthorized']
-)
+# ログインフォームの表示
+if not st.session_state.logged_in:
+    st.title("ログイン")
+    email = st.text_input("メールアドレス", type="email")
+    password = st.text_input("パスワード", type="password")
 
-# ログインフォームの追加
-name, authentication_status, username = authenticator.login('ログイン', 'sidebar')
-
-if authentication_status:
-    # ログイン後のサイドバーにログアウトボタンとチャット履歴
-    with st.sidebar:
-        authenticator.logout('ログアウト')
-        st.header("チャット履歴")
-        chat_history = db.collection('chat_history').where('user', '==', username).get()
-        for chat in chat_history:
-            st.write(chat.to_dict()['summary_title'])
-        if st.button("新規チャットを開く"):
-            st.session_state.messages = []
-            st.session_state.html_content = None
-            clear_firebase_documents()
-            st.success("新しいチャットを開始しました。")
-    
-    # メインアプリの表示
+    if st.button("ログイン"):
+        if login(email, password):
+            st.session_state.logged_in = True
+            st.success("ログイン成功！")
+        else:
+            st.error("ログイン失敗。メールアドレスまたはパスワードが無効です。")
+else:
+    # ログイン後のチャット画面
     st.title("YuyaGPT")
 
-    # APIキーが正しく取得できたか確認
-    if not openai_api_key or not anthropic_api_key or not gemini_api_key or not cohere_api_key or not groq_api_key:
-        st.error("APIキーが正しく設定されていません。.envファイルを確認してください。")
-        st.stop()
+    # サイドバーにログアウトボタンと過去の履歴を表示
+    with st.sidebar:
+        if st.button("ログアウト"):
+            st.session_state.logged_in = False
+            st.session_state.chat_history = []  # チャット履歴をクリア
+            st.experimental_rerun()  # ページを再読み込み
 
-    # セッション状態の初期化
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "html_content" not in st.session_state:
-        st.session_state.html_content = None
-
-    # メインコンテナの設定
-    main = st.container()
+        # 過去の会話履歴の選択
+        chat_history = db.collection('chat_history').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(20).get()
+        chat_options = [f"{doc.to_dict()['summary_title']} - {doc.to_dict()['timestamp']}" for doc in chat_history]
+        selected_chat = st.selectbox("過去の会話を選択", chat_options)
 
     # モデル選択のプルダウン
     model_choice = st.selectbox(
@@ -269,8 +226,7 @@ if authentication_status:
                 db.collection('chat_history').add({
                     'messages': latest_conversation,
                     'summary_title': summary_title,
-                    'timestamp': firestore.SERVER_TIMESTAMP,
-                    'user': username
+                    'timestamp': firestore.SERVER_TIMESTAMP
                 })
 
                 # HTMLコンテンツの抽出
@@ -295,15 +251,10 @@ if authentication_status:
             with tab2:
                 st.code(st.session_state.html_content, language="html")
 
-    # 会話履歴のクリアボタン
-    if st.button("会話履歴をクリア"):
-        st.session_state.messages = []
-        st.session_state.html_content = None
-        clear_firebase_documents()  # Firebaseのドキュメントを削除
-        st.success("会話履歴とFirebaseのドキュメントが削除されました。")
-        st.rerun()  # ページを再読み込み
-
-elif authentication_status == False:
-    st.error("ユーザー名またはパスワードが正しくありません。")
-elif authentication_status == None:
-    st.warning("ログインしてください。")
+# 会話履歴のクリアボタン
+if st.button("会話履歴をクリア"):
+    st.session_state.messages = []
+    st.session_state.html_content = None
+    clear_firebase_documents()  # Firebaseのドキュメントを削除
+    st.success("会話履歴とFirebaseのドキュメントが削除されました。")
+    st.rerun()  # ページを再読み込み
