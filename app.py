@@ -15,6 +15,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
+import hashlib
 
 # .envファイルを読み込む
 load_dotenv()
@@ -28,6 +29,12 @@ GAS、Pythonから始まり多岐にわたるプログラミング言語を習�
 コードを出力する際は、必ず適切な言語名を指定してコードブロックを使用してください。
 同様に、Python、JavaScript、CSSなどのコードも適切なコードブロックで囲んでください。
 """
+
+# ユーザー認証情報（実際の使用時はデータベースなどを使用してください）
+USERS = {
+    "user1": hashlib.sha256("password1".encode()).hexdigest(),
+    "user2": hashlib.sha256("password2".encode()).hexdigest(),
+}
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -225,70 +232,94 @@ def generate_response(ai_prompt, model_choice, memory):
         st.error(f"エラーが発生しました: {str(e)}")
         yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
 
-# 起動時に.envファイルを読み込む
-reload_env()
+# ログイン状態の確認
+def check_login_status():
+    return st.session_state.get('logged_in', False)
 
-st.title("YuyaGPT")
+# ログインページ
+def login_page():
+    st.title("ログイン")
+    username = st.text_input("ユーザー名")
+    password = st.text_input("パスワード", type="password")
+    if st.button("ログイン"):
+        if username in USERS and USERS[username] == hashlib.sha256(password.encode()).hexdigest():
+            st.session_state['logged_in'] = True
+            st.session_state['username'] = username
+            st.success("ログインに成功しました。")
+            st.rerun()
+        else:
+            st.error("ユーザー名またはパスワードが間違っています。")
 
-# セッション状態の初期化
-if "memory" not in st.session_state:
-    st.session_state.memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True,
+# メイン機能の関数
+def main_app():
+    st.title("YuyaGPT")
+
+    # ログアウトボタン
+    if st.button("ログアウト"):
+        st.session_state['logged_in'] = False
+        st.session_state.pop('username', None)
+        st.success("ログアウトしました。")
+        st.rerun()
+
+    # セッション状態の初期化
+    if "memory" not in st.session_state:
+        st.session_state.memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True,
+        )
+
+    if "html_content" not in st.session_state:
+        st.session_state.html_content = ""
+
+    # モデル選択のプルダウン
+    model_choice = st.selectbox(
+        "使用するモデルを選択してください",
+        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
     )
 
-if "html_content" not in st.session_state:
-    st.session_state.html_content = ""
+    # メインコンテンツエリアの作成
+    main = st.container()
 
-# モデル選択のプルダウン
-model_choice = st.selectbox(
-    "使用するモデルを選択してください",
-    ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
-)
+    # 会話履歴の表示
+    for message in st.session_state.memory.chat_memory.messages:
+        with st.chat_message(message.type):
+            st.markdown(message.content)
 
-# メインコンテンツエリアの作成
-main = st.container()
+    # ユーザー入力の処理
+    if prompt := st.chat_input("質問を入力してください"):
+        st.session_state.memory.chat_memory.add_user_message(prompt)
+        with st.chat_message("human"):
+            st.markdown(prompt)
 
-# 会話履歴の表示
-for message in st.session_state.memory.chat_memory.messages:
-    with st.chat_message(message.type):
-        st.markdown(message.content)
+        # AI応答の生成
+        with st.chat_message("ai"):
+            message_placeholder = st.empty()
+            try:
+                full_response = ""
+                for response in generate_response(prompt, model_choice, st.session_state.memory):
+                    full_response = response
+                    message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+                
+                # HTMLコンテンツの抽出
+                html_content = extract_html_content(full_response)
+                if html_content:
+                    st.session_state.html_content = html_content
+            except Exception as e:
+                st.error(f"エラーが発生しました: {str(e)}")
+                message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
 
-# ユーザー入力の処理
-if prompt := st.chat_input("質問を入力してください"):
-    st.session_state.memory.chat_memory.add_user_message(prompt)
-    with st.chat_message("human"):
-        st.markdown(prompt)
-
-    # AI応答の生成
-    with st.chat_message("ai"):
-        message_placeholder = st.empty()
-        try:
-            full_response = ""
-            for response in generate_response(prompt, model_choice, st.session_state.memory):
-                full_response = response
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-            
-            # HTMLコンテンツの抽出
-            html_content = extract_html_content(full_response)
-            if html_content:
-                st.session_state.html_content = html_content
-        except Exception as e:
-            st.error(f"エラーが発生しました: {str(e)}")
-            message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
-
-# HTMLコンテンツの表示
-if st.session_state.html_content:
-    with main:
-        tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
-        with tab1:
-            st.subheader("HTMLプレビュー")
-            display_html_preview(st.session_state.html_content)
-        with tab2:
-            st.subheader("HTMLソースコード")
-            st.code(st.session_state.html_content, language="html")
-
+    # HTMLコンテンツの表示
+    if st.session_state.html_content:
+        with main:
+            tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
+            with tab1:
+                st.subheader("HTMLプレビュー")
+                display_html_preview(st.session_state.html_content)
+            with tab2:
+                st.subheader("HTMLソースコード")
+                st.code(st.session_state.html_content, language="html")
+                
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.memory.clear()
