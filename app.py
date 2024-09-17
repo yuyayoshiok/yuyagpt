@@ -191,67 +191,27 @@ model_choice = st.selectbox(
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
 )
 
-if uploaded_file:
-    # 一時ファイルにPDFを書き込みバスを取得
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_file_path = tmp_file.name
+# 会話履歴の表示
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-    # PDFを読み込む
-    loader = PyMuPDFLoader(file_path=tmp_file_path)
-    documents = loader.load()
+# ユーザー入力の処理
+user_input = st.text_input("質問を入力してください")  # 確実にテキストボックスが表示されるように修正
 
-    # テキストをチャンク化
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100,
-        length_function=len,
-    )
-    chunks = text_splitter.split_documents(documents)
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    # 埋め込みを作成
-    embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
-    vector_store = Chroma(
-        persist_directory="./.data",
-        embedding_function=embeddings,
-    )
-
-    vector_store.add_documents(chunks)
-
-    # モデルを使用した会話チェーンを作成
-    retriever = vector_store.as_retriever()
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=ChatOpenAI(),
-        retriever=retriever,
-        memory=st.session_state.memory,
-    )
-
-    # UI用の会話履歴を表示
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # ユーザー入力の処理
-    user_input = st.text_input("質問を入力してください", key="user_input")  # ここで st.text_input を使用
-
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        # AI応答の生成
-        with st.chat_message("assistant"):
-            with st.spinner("思考中..."):
-                response = chain.run({"question": user_input})
-                st.markdown(response)
-
-        # 会話履歴に保存
-        st.session_state.messages.append({"role": "assistant", "content": response})
-
-
+    # AI応答の生成
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = generate_response(user_input, model_choice, message_placeholder)
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.messages = []
     st.session_state.memory.clear()
-    st.experimental_rerun()
+    st.experimental_rerun()  # エラーを避けるため、この行を削除するか、別の状態リセット処理に置き換える
