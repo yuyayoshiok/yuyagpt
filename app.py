@@ -14,7 +14,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import cohere
 from groq import Groq
-from streamlit_custom_login import login_page, logout
 
 # 起動時に.envファイルを読み込む
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
@@ -111,13 +110,32 @@ co = cohere.Client(st.secrets["cohere"]["api_key"])
 # Groqクライアントの初期化
 groq_client = Groq(api_key=st.secrets["groq"]["api_key"])
 
-# ログイン状態の確認
+# ログイン機能の実装
+def login():
+    username = st.text_input("ユーザー名")
+    password = st.text_input("パスワード", type="password")
+    if st.button("ログイン"):
+        # ここで実際の認証ロジックを実装します
+        # 例: if username == "admin" and password == "password":
+        if username and password:  # 簡単な例として、何か入力されていればログイン成功とします
+            st.session_state.logged_in = True
+            st.success("ログインに成功しました！")
+            st.experimental_rerun()
+        else:
+            st.error("ログインに失敗しました。")
+
+# ログアウト機能の実装
+def logout():
+    st.session_state.logged_in = False
+    st.success("ログアウトしました。")
+    st.experimental_rerun()
+
+# メインのアプリケーションコード
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
-# ログインページの表示
 if not st.session_state.logged_in:
-    login_page()
+    login()
 else:
     # サイドバーの設定
     with st.sidebar:
@@ -276,4 +294,4 @@ if st.button("会話履歴をクリア"):
 
 # ページの再読み込み処理
 if 'reload_page' in st.session_state and st.session_state.reload_page:
-    st.session_state.reload_page = True  # ペーの再読み込みフラグを設定
+    st.session_state.reload_page = True  # ページの再読み込みフラグを設定
