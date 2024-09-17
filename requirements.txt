@@ -11,3 +11,4 @@ PyMuPDF
 langchain
 chromadb
 python-dotenv
+langchain-community
