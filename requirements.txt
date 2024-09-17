@@ -1,14 +1,13 @@
-   openai
-   anthropic
-   google-generativeai
-   requests
-   beautifulsoup4
-   firebase-admin
-   scikit-learn
-   llama-index
-   python-dotenv
-   streamlit
-   chardet
-   streamlit-option-menu==0.3.2
-   cohere
-   groq
+streamlit
+openai
+anthropic
+google-generativeai
+cohere
+groq
+requests
+beautifulsoup4
+scikit-learn
+PyMuPDF
+langchain
+chromadb
+python-dotenv
