@@ -20,7 +20,11 @@ load_dotenv()  # .envファイルの内容を環境変数としてロードす�
 
 # Firebaseの初期化
 if not firebase_admin._apps:
-    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    try:
+        firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+    except json.JSONDecodeError:
+        st.error("Firebase認証情報のJSONデコードに失敗しました。認証情報を確認してください。")
+        st.stop()
     cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
 
