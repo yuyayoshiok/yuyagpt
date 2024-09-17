@@ -32,8 +32,7 @@ GAS、Pythonから始まり多岐にわたるプログラミング言語を習�
 
 # ユーザー認証情報（実際の使用時はデータベースなどを使用してください）
 USERS = {
-    "user1": hashlib.sha256("password1".encode()).hexdigest(),
-    "user2": hashlib.sha256("password2".encode()).hexdigest(),
+    "yuyayoshiok@gmail.com": hashlib.sha256("Yoshi0731".encode()).hexdigest(),
 }
 
 # .envファイルの再読み込み関数
@@ -255,7 +254,7 @@ def main_app():
     st.title("YuyaGPT")
 
     # ログアウトボタン
-    if st.button("ログアウト"):
+    if st.sidebar.button("ログアウト"):
         st.session_state['logged_in'] = False
         st.session_state.pop('username', None)
         st.success("ログアウトしました。")
@@ -319,9 +318,20 @@ def main_app():
             with tab2:
                 st.subheader("HTMLソースコード")
                 st.code(st.session_state.html_content, language="html")
-                
-# 会話履歴のクリアボタン
-if st.button("会話履歴をクリア"):
-    st.session_state.memory.clear()
-    st.session_state.html_content = ""
-    st.rerun()  # 最新のStreamlit APIを使用してページを再読み込み
+
+    # 会話履歴のクリアボタン
+    if st.sidebar.button("会話履歴をクリア"):
+        st.session_state.memory.clear()
+        st.session_state.html_content = ""
+        st.rerun()
+
+# メイン処理
+def main():
+    reload_env()
+    if check_login_status():
+        main_app()
+    else:
+        login_page()
+
+if __name__ == "__main__":
+    main()
