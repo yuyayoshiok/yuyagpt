@@ -1,14 +1,9 @@
-streamlit
-streamlit-authenticator
-openai
-anthropic
-google-generativeai
-cohere
-groq
-requests
-beautifulsoup4
-scikit-learn
-firebase-admin
-python-dotenv
-PyYAML
-bcrypt
+     streamlit
+     openai
+     anthropic
+     google-generativeai
+     requests
+     beautifulsoup4
+     firebase-admin
+     scikit-learn
+     python-dotenv
