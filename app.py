@@ -14,6 +14,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import json
 import time
 from langchain.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.document_loaders import PyMuPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
@@ -32,6 +33,7 @@ SYSTEM_PROMPT = (
     "チャットでは日本語で応対してください。"
     "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
 )
+
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -127,13 +129,15 @@ def groq_chat_stream(prompt):
             yield chunk.choices[0].delta.content
 
 # AIモデルにプロンプトを送信し、応答を生成
-def generate_response(ai_prompt, model_choice):
+def generate_response(ai_prompt, model_choice, memory):
     full_response = ""
+    chat_history = memory.chat_memory.messages
+    messages = [SystemMessage(content=SYSTEM_PROMPT)] + chat_history + [HumanMessage(content=ai_prompt)]
 
     if model_choice == "OpenAI GPT-4o-mini":
         for chunk in openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": ai_prompt}],
+            messages=[{"role": m.type, "content": m.content} for m in messages],
             stream=True
         ):
             if chunk.choices[0].delta.content is not None:
@@ -144,7 +148,7 @@ def generate_response(ai_prompt, model_choice):
         with anthropic_client.messages.stream(
             model="claude-3-5-sonnet-20240620",
             max_tokens=8000,
-            messages=[{"role": "user", "content": ai_prompt}]
+            messages=[{"role": m.type, "content": m.content} for m in messages]
         ) as stream:
             for text in stream.text_stream:
                 full_response += text
@@ -152,7 +156,7 @@ def generate_response(ai_prompt, model_choice):
 
     elif model_choice == "Gemini 1.5 flash":
         model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(ai_prompt, stream=True)
+        response = model.generate_content([m.content for m in messages], stream=True)
         for chunk in response:
             full_response += chunk.text
             yield full_response
@@ -167,6 +171,9 @@ def generate_response(ai_prompt, model_choice):
             full_response += chunk
             yield full_response
 
+    # 会話履歴に応答を追加
+    memory.chat_memory.add_ai_message(full_response)
+
 # 起動時に.envファイルを読み込む
 reload_env()
 
@@ -176,8 +183,6 @@ st.title("YuyaGPT")
 uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type="pdf")
 
 # セッション状態の初期化
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 if "memory" not in st.session_state:
     st.session_state.memory = ConversationBufferMemory(
         memory_key="chat_history",
@@ -191,25 +196,23 @@ model_choice = st.selectbox(
 )
 
 # 会話履歴の表示
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for message in st.session_state.memory.chat_memory.messages:
+    with st.chat_message(message.type):
+        st.markdown(message.content)
 
 # ユーザー入力の処理
 if prompt := st.chat_input("質問を入力してください"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
+    st.session_state.memory.chat_memory.add_user_message(prompt)
+    with st.chat_message("human"):
         st.markdown(prompt)
 
     # AI応答の生成
-    with st.chat_message("assistant"):
+    with st.chat_message("ai"):
         message_placeholder = st.empty()
-        for response in generate_response(prompt, model_choice):
+        for response in generate_response(prompt, model_choice, st.session_state.memory):
             message_placeholder.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
-    st.session_state.messages = []
     st.session_state.memory.clear()
     st.experimental_rerun()  # ページを再読み込みして状態をリセット
