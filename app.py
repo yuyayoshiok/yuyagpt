@@ -1,7 +1,6 @@
 import os
 import re
 import base64
-import tempfile
 from dotenv import load_dotenv
 import streamlit as st
 import streamlit.components.v1 as components
@@ -14,8 +13,6 @@ import requests
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import json
-import time
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 
