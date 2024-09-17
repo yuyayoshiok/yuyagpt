@@ -13,13 +13,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
 import time
-from langchain.chat_models import ChatOpenAI
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain.document_loaders import PyMuPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
 # .envファイルを読み込む
@@ -33,14 +27,6 @@ SYSTEM_PROMPT = (
     "チャットでは日本語で応対してください。"
     "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
 )
-
-# APIキーの検証
-def validate_api_keys():
-    if not st.secrets["openai"]["api_key"]:
-        st.error("OpenAI APIキーが設定されていません。")
-        return False
-    # 他のAPIキーの検証も同様に追加
-    return True
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -135,6 +121,55 @@ def groq_chat_stream(prompt):
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
+import os
+import tempfile
+from dotenv import load_dotenv
+import streamlit as st
+from openai import OpenAI
+from anthropic import Anthropic
+import google.generativeai as genai
+import cohere
+from groq import Groq
+import requests
+from bs4 import BeautifulSoup
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import json
+import time
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
+from langchain.memory import ConversationBufferMemory
+
+# .envファイルを読み込む
+load_dotenv()
+
+# システムプロンプトの定義
+SYSTEM_PROMPT = (
+    "あなたはプロのエンジニアでありプログラマーです。"
+    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
+    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
+    "チャットでは日本語で応対してください。"
+    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
+)
+
+# .envファイルの再読み込み関数
+def reload_env():
+    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    load_dotenv(dotenv_path, override=True)
+    
+    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key, groq_api_key
+    openai_api_key = st.secrets["openai"]["api_key"]
+    anthropic_api_key = st.secrets["anthropic"]["api_key"]
+    gemini_api_key = st.secrets["gemini"]["api_key"]
+    cohere_api_key = st.secrets["cohere"]["api_key"]
+    groq_api_key = st.secrets["groq"]["api_key"]
+    
+    global openai_client, anthropic_client, co, groq_client
+    openai_client = OpenAI(api_key=openai_api_key)
+    anthropic_client = Anthropic(api_key=anthropic_api_key)
+    genai.configure(api_key=gemini_api_key)
+    co = cohere.Client(api_key=cohere_api_key)
+    groq_client = Groq(api_key=groq_api_key)
+
 # メッセージの役割を適切に変換する関数
 def convert_role_for_api(role):
     if role == 'human':
@@ -147,12 +182,13 @@ def convert_role_for_api(role):
 def generate_response(ai_prompt, model_choice, memory):
     full_response = ""
     chat_history = memory.chat_memory.messages
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
-        {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
-    ] + [{"role": "user", "content": ai_prompt}]
-
+    
     try:
         if model_choice == "OpenAI GPT-4o-mini":
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+                {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
+            ] + [{"role": "user", "content": ai_prompt}]
+            
             for chunk in openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
@@ -163,9 +199,14 @@ def generate_response(ai_prompt, model_choice, memory):
                     yield full_response
 
         elif model_choice == "Claude 3.5 Sonnet":
+            messages = [
+                {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
+            ] + [{"role": "user", "content": ai_prompt}]
+            
             with anthropic_client.messages.stream(
                 model="claude-3-5-sonnet-20240620",
                 max_tokens=8000,
+                system=SYSTEM_PROMPT,
                 messages=messages
             ) as stream:
                 for text in stream.text_stream:
@@ -173,6 +214,10 @@ def generate_response(ai_prompt, model_choice, memory):
                     yield full_response
 
         elif model_choice == "Gemini 1.5 flash":
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+                {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
+            ] + [{"role": "user", "content": ai_prompt}]
+            
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content([m["content"] for m in messages], stream=True)
             for chunk in response:
@@ -241,4 +286,4 @@ if prompt := st.chat_input("質問を入力してください"):
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.memory.clear()
-    st.experimental_rerun()  # ページを再読み込みして状態をリセット
+    st.rerun()  # 最新のStreamlit APIを使用してページを再読み込み
