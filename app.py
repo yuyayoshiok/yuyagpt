@@ -1,7 +1,9 @@
 import os
+import re
 import tempfile
 from dotenv import load_dotenv
 import streamlit as st
+import streamlit.components.v1 as components
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
@@ -213,15 +215,18 @@ reload_env()
 
 st.title("YuyaGPT")
 
-# PDFファイルのアップロード
-uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type="pdf")
-
 # セッション状態の初期化
 if "memory" not in st.session_state:
     st.session_state.memory = ConversationBufferMemory(
         memory_key="chat_history",
         return_messages=True,
     )
+
+if "html_content" not in st.session_state:
+    st.session_state.html_content = ""
+
+# PDFファイルのアップロード
+uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type="pdf")
 
 # モデル選択のプルダウン
 model_choice = st.selectbox(
@@ -247,11 +252,14 @@ if prompt := st.chat_input("質問を入力してください"):
     with st.chat_message("ai"):
         message_placeholder = st.empty()
         try:
+            full_response = ""
             for response in generate_response(prompt, model_choice, st.session_state.memory):
-                message_placeholder.markdown(response)
+                full_response += response
+                message_placeholder.markdown(full_response + "▌")
+            message_placeholder.markdown(full_response)
             
             # HTMLコンテンツの抽出（例：コード内のHTMLブロックを検出）
-            html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', response)
+            html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', full_response)
             if html_blocks:
                 st.session_state.html_content = html_blocks[0]
         except Exception as e:
