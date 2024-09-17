@@ -135,17 +135,27 @@ def groq_chat_stream(prompt):
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
+# メッセージの役割を適切に変換する関数
+def convert_role_for_api(role):
+    if role == 'human':
+        return 'user'
+    elif role == 'ai':
+        return 'assistant'
+    return role
+
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(ai_prompt, model_choice, memory):
     full_response = ""
     chat_history = memory.chat_memory.messages
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + chat_history + [HumanMessage(content=ai_prompt)]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+        {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
+    ] + [{"role": "user", "content": ai_prompt}]
 
     try:
         if model_choice == "OpenAI GPT-4o-mini":
             for chunk in openai_client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": m.type, "content": m.content} for m in messages],
+                messages=messages,
                 stream=True
             ):
                 if chunk.choices[0].delta.content is not None:
@@ -156,7 +166,7 @@ def generate_response(ai_prompt, model_choice, memory):
             with anthropic_client.messages.stream(
                 model="claude-3-5-sonnet-20240620",
                 max_tokens=8000,
-                messages=[{"role": m.type, "content": m.content} for m in messages]
+                messages=messages
             ) as stream:
                 for text in stream.text_stream:
                     full_response += text
@@ -164,7 +174,7 @@ def generate_response(ai_prompt, model_choice, memory):
 
         elif model_choice == "Gemini 1.5 flash":
             model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content([m.content for m in messages], stream=True)
+            response = model.generate_content([m["content"] for m in messages], stream=True)
             for chunk in response:
                 full_response += chunk.text
                 yield full_response
@@ -190,10 +200,6 @@ def generate_response(ai_prompt, model_choice, memory):
 reload_env()
 
 st.title("YuyaGPT")
-
-# APIキーの検証
-if not validate_api_keys():
-    st.stop()
 
 # PDFファイルのアップロード
 uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type="pdf")
