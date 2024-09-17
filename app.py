@@ -127,7 +127,7 @@ def groq_chat_stream(prompt):
             yield chunk.choices[0].delta.content
 
 # AIモデルにプロンプトを送信し、応答を生成
-def generate_response(ai_prompt, model_choice, message_placeholder):
+def generate_response(ai_prompt, model_choice):
     full_response = ""
 
     if model_choice == "OpenAI GPT-4o-mini":
@@ -138,7 +138,7 @@ def generate_response(ai_prompt, model_choice, message_placeholder):
         ):
             if chunk.choices[0].delta.content is not None:
                 full_response += chunk.choices[0].delta.content
-                message_placeholder.markdown(full_response + "▌")
+                yield full_response
 
     elif model_choice == "Claude 3.5 Sonnet":
         with anthropic_client.messages.stream(
@@ -148,28 +148,24 @@ def generate_response(ai_prompt, model_choice, message_placeholder):
         ) as stream:
             for text in stream.text_stream:
                 full_response += text
-                message_placeholder.markdown(full_response + "▌")
+                yield full_response
 
     elif model_choice == "Gemini 1.5 flash":
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(ai_prompt, stream=True)
         for chunk in response:
             full_response += chunk.text
-            message_placeholder.markdown(full_response + "▌")
+            yield full_response
 
     elif model_choice == "Cohere Command-R Plus":
         for chunk in cohere_chat_stream(ai_prompt):
             full_response += chunk
-            message_placeholder.markdown(full_response + "▌")
+            yield full_response
 
     else:  # Groq llama3-70b-8192
         for chunk in groq_chat_stream(ai_prompt):
             full_response += chunk
-            message_placeholder.markdown(full_response + "▌")
-
-    # 最終的な応答を表示し、"▌"を取り除く
-    message_placeholder.markdown(full_response)
-    return full_response
+            yield full_response
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -199,7 +195,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# ユーザー入力の処理（Streamlitの`st.chat_input()`を使用）
+# ユーザー入力の処理
 if prompt := st.chat_input("質問を入力してください"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -208,8 +204,9 @@ if prompt := st.chat_input("質問を入力してください"):
     # AI応答の生成
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        full_response = generate_response(prompt, model_choice, message_placeholder)
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+        for response in generate_response(prompt, model_choice):
+            message_placeholder.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
