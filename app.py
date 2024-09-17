@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 import tempfile
 from dotenv import load_dotenv
 import streamlit as st
@@ -219,12 +220,57 @@ def generate_response(ai_prompt, model_choice, memory):
         st.error(f"エラーが発生しました: {str(e)}")
         yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
 
+import os
+import re
+import base64
+import tempfile
+from dotenv import load_dotenv
+import streamlit as st
+import streamlit.components.v1 as components
+from openai import OpenAI
+from anthropic import Anthropic
+import google.generativeai as genai
+import cohere
+from groq import Groq
+import requests
+from bs4 import BeautifulSoup
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import json
+import time
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
+from langchain.memory import ConversationBufferMemory
+
+# .envファイルを読み込む
+load_dotenv()
+
+# システムプロンプトの定義
+SYSTEM_PROMPT = (
+    "あなたはプロのエンジニアでありプログラマーです。"
+    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
+    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
+    "チャットでは日本語で応対してください。"
+    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
+)
+
+# ... (他の関数は変更なし) ...
+
 # HTMLコンテンツを抽出する関数
 def extract_html_content(text):
     html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', text)
     if html_blocks:
         return html_blocks[0]
     return None
+
+# HTMLをbase64エンコードしてdata URLを作成する関数
+def get_html_data_url(html):
+    b64 = base64.b64encode(html.encode()).decode()
+    return f"data:text/html;base64,{b64}"
+
+# HTMLプレビューを表示する関数
+def display_html_preview(html_content):
+    html_data_url = get_html_data_url(html_content)
+    components.iframe(html_data_url, height=600, scrolling=True)
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -287,7 +333,7 @@ if st.session_state.html_content:
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
         with tab1:
-            components.html(st.session_state.html_content, height=640, scrolling=True)
+            display_html_preview(st.session_state.html_content)
         with tab2:
             st.code(st.session_state.html_content, language="html")
 
