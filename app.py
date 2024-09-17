@@ -240,9 +240,6 @@ if "memory" not in st.session_state:
 if "html_content" not in st.session_state:
     st.session_state.html_content = ""
 
-# PDFファイルのアップロード
-uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type="pdf")
-
 # モデル選択のプルダウン
 model_choice = st.selectbox(
     "使用するモデルを選択してください",
