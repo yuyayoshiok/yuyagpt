@@ -229,6 +229,9 @@ model_choice = st.selectbox(
     ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
 )
 
+# メインコンテンツエリアの作成
+main = st.container()
+
 # 会話履歴の表示
 for message in st.session_state.memory.chat_memory.messages:
     with st.chat_message(message.type):
@@ -246,6 +249,11 @@ if prompt := st.chat_input("質問を入力してください"):
         try:
             for response in generate_response(prompt, model_choice, st.session_state.memory):
                 message_placeholder.markdown(response)
+            
+            # HTMLコンテンツの抽出（例：コード内のHTMLブロックを検出）
+            html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', response)
+            if html_blocks:
+                st.session_state.html_content = html_blocks[0]
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
             message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
@@ -262,4 +270,5 @@ if st.session_state.html_content:
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.memory.clear()
+    st.session_state.html_content = ""
     st.rerun()  # 最新のStreamlit APIを使用してページを再読み込み
