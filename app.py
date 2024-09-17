@@ -32,8 +32,7 @@ GAS、Pythonから始まり多岐にわたるプログラミング言語を習�
 
 # ユーザー認証情報（実際の使用時はデータベースなどを使用してください）
 USERS = {
-    "user1": hashlib.sha256("password1".encode()).hexdigest(),
-    "user2": hashlib.sha256("password2".encode()).hexdigest(),
+    "yuyayoshiok@gmail.com": hashlib.sha256("Yoshi0731".encode()).hexdigest(),
 }
 
 # .envファイルの再読み込み関数
