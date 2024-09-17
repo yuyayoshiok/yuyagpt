@@ -1,3 +1,4 @@
+```python
 import os
 import re
 import base64
@@ -23,14 +24,29 @@ from langchain.memory import ConversationBufferMemory
 load_dotenv()
 
 # システムプロンプトの定義
-SYSTEM_PROMPT = (
-    "あなたはプロのエンジニアでありプログラマーです。"
-    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
-    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
-    "チャットでは日本語で応対してください。"
-    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
-)
+SYSTEM_PROMPT = """
+あなたはプロのエンジニアでありプログラマーです。
+GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。
+あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。
+チャットでは日本語で応対してください。
+コードを出力する際は、必ず適切な言語名を指定してコードブロックを使用してください。
+例えば、HTMLコードを出力する場合は以下のようにしてください：
 
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>例題</title>
+</head>
+<body>
+    <h1>これは例です</h1>
+</body>
+</html>
+```
+
+同様に、Python、JavaScript、CSSなどのコードも適切なコードブロックで囲んでください。
+"""
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -95,7 +111,6 @@ def get_context(current_query, chat_history, max_tokens=1000):
                 total_tokens += len(content.split())
     return '\n\n'.join(context)
 
-
 # Cohereを使用した会話機能（ストリーミング対応）
 def cohere_chat_stream(prompt):
     response = co.chat_stream(
@@ -147,13 +162,22 @@ def format_messages_for_claude(messages):
             formatted_messages.append(message)
     return formatted_messages
 
-# テキストのクリーニング関数
-def clean_text(text):
-    # 連続する重複を除去
-    cleaned = re.sub(r'(.+?)\1+', r'\1', text)
-    # 余分な空白を除去
-    cleaned = ' '.join(cleaned.split())
-    return cleaned
+# HTMLコンテンツを抽出する関数
+def extract_html_content(text):
+    html_blocks = re.findall(r'```html\s*([\s\S]*?)\s*```', text, re.IGNORECASE)
+    if html_blocks:
+        return html_blocks[0].strip()
+    return None
+
+# HTMLをbase64エンコードしてdata URLを作成する関数
+def get_html_data_url(html):
+    b64 = base64.b64encode(html.encode()).decode()
+    return f"data:text/html;base64,{b64}"
+
+# HTMLプレビューを表示する関数
+def display_html_preview(html_content):
+    html_data_url = get_html_data_url(html_content)
+    components.iframe(html_data_url, height=600, scrolling=True)
 
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(ai_prompt, model_choice, memory):
@@ -173,7 +197,7 @@ def generate_response(ai_prompt, model_choice, memory):
             ):
                 if chunk.choices[0].delta.content is not None:
                     full_response += chunk.choices[0].delta.content
-                    yield clean_text(full_response)
+                    yield full_response
 
         elif model_choice == "Claude 3.5 Sonnet":
             messages = [
@@ -190,7 +214,7 @@ def generate_response(ai_prompt, model_choice, memory):
             ) as stream:
                 for text in stream.text_stream:
                     full_response += text
-                    yield clean_text(full_response)
+                    yield full_response
 
         elif model_choice == "Gemini 1.5 flash":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
@@ -201,41 +225,24 @@ def generate_response(ai_prompt, model_choice, memory):
             response = model.generate_content([m["content"] for m in messages], stream=True)
             for chunk in response:
                 full_response += chunk.text
-                yield clean_text(full_response)
+                yield full_response
 
         elif model_choice == "Cohere Command-R Plus":
             for chunk in cohere_chat_stream(ai_prompt):
                 full_response += chunk
-                yield clean_text(full_response)
+                yield full_response
 
         else:  # Groq llama3-70b-8192
             for chunk in groq_chat_stream(ai_prompt):
                 full_response += chunk
-                yield clean_text(full_response)
+                yield full_response
 
         # 会話履歴に応答を追加
-        memory.chat_memory.add_ai_message(clean_text(full_response))
+        memory.chat_memory.add_ai_message(full_response)
 
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
         yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
-
-# HTMLコンテンツを抽出する関数
-def extract_html_content(text):
-    html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', text)
-    if html_blocks:
-        return html_blocks[0]
-    return None
-
-# HTMLをbase64エンコードしてdata URLを作成する関数
-def get_html_data_url(html):
-    b64 = base64.b64encode(html.encode()).decode()
-    return f"data:text/html;base64,{b64}"
-
-# HTMLプレビューを表示する関数
-def display_html_preview(html_content):
-    html_data_url = get_html_data_url(html_content)
-    components.iframe(html_data_url, height=600, scrolling=True)
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -281,7 +288,7 @@ if prompt := st.chat_input("質問を入力してください"):
         try:
             full_response = ""
             for response in generate_response(prompt, model_choice, st.session_state.memory):
-                full_response = response  # クリーニング済みの応答を使用
+                full_response = response
                 message_placeholder.markdown(full_response + "▌")
             message_placeholder.markdown(full_response)
             
@@ -289,16 +296,16 @@ if prompt := st.chat_input("質問を入力してください"):
             html_content = extract_html_content(full_response)
             if html_content:
                 st.session_state.html_content = html_content
-                st.success("HTMLコンテンツが抽出されました。")  # デバッグ用
+                st.success("HTMLコンテンツが抽出されました。")
             else:
-                st.warning("HTMLコンテンツが見つかりませんでした。")  # デバッグ用
+                st.warning("HTMLコンテンツが見つかりませんでした。")
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
             message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
 
 # HTMLコンテンツの表示
 if st.session_state.html_content:
-    st.success(f"HTMLコンテンツの長さ: {len(st.session_state.html_content)} 文字")  # デバッグ用
+    st.success(f"HTMLコンテンツの長さ: {len(st.session_state.html_content)} 文字")
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
         with tab1:
@@ -320,3 +327,4 @@ if st.button("会話履歴をクリア"):
 st.subheader("デバッグ情報")
 st.write(f"セッション状態のキー: {list(st.session_state.keys())}")
 st.write(f"HTMLコンテンツの有無: {'あり' if st.session_state.html_content else 'なし'}")
+```
