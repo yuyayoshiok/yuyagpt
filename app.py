@@ -31,9 +31,8 @@ ALLOWED_EMAILS = ["yuyayoshiok@gmail.com"]  # 許可するメールアドレス�
 def login(email, password):
     try:
         user = auth.get_user_by_email(email)
-        # パスワードの検証（Firebaseでは直接パスワードを検証できないため、別途実装が必要）
-        # ここでは簡略化のため、パスワードが"password"であると仮定
-        if user and password == "password" and email in ALLOWED_EMAILS:
+        # パスワードの検証
+        if user and password == "Yoshi0731" and email in ALLOWED_EMAILS:
             return True
         else:
             return False
