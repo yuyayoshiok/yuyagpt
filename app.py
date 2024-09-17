@@ -175,15 +175,17 @@ def display_html_preview(html_content):
     html_data_url = get_html_data_url(html_content)
     components.iframe(html_data_url, height=600, scrolling=True)
 
-# Cohereを使用した会話機能（ストリーミング対応）
+# Cohereを使用した会話機能（ストリーミング対応、新しいSDKバージョンに対応）
 def cohere_chat_stream(prompt):
-    chat_history = [m.content for m in st.session_state.memory.chat_memory.messages]
-    response = co.chat(
+    chat_history = [
+        {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
+        for m in st.session_state.memory.chat_memory.messages
+    ]
+    response = co.chat_stream(
         model='command-r-plus-08-2024',
         message=prompt,
         temperature=0.5,
         chat_history=chat_history,
-        stream=True
     )
     for event in response:
         if event.event_type == "text-generation":
