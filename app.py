@@ -32,7 +32,8 @@ GAS、Pythonから始まり多岐にわたるプログラミング言語を習�
 
 # ユーザー認証情報（実際の使用時はデータベースなどを使用してください）
 USERS = {
-    "yuyayoshiok@gmail.com": hashlib.sha256("Yoshi0731".encode()).hexdigest(),
+    "user1": hashlib.sha256("password1".encode()).hexdigest(),
+    "user2": hashlib.sha256("password2".encode()).hexdigest(),
 }
 
 # .envファイルの再読み込み関数
@@ -54,78 +55,87 @@ def reload_env():
     co = cohere.Client(api_key=cohere_api_key)
     groq_client = Groq(api_key=groq_api_key)
 
+# URLの検出関数
+def detect_url(text):
+    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+    urls = url_pattern.findall(text)
+    return urls[0] if urls else None
+
 # スクレイピングと要約の関数
-def scrape_and_summarize(url):
+def scrape_and_summarize(url, model_choice):
     try:
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # メタデータの取得
+        title = soup.title.string if soup.title else "No title"
+        description = soup.find('meta', attrs={'name': 'description'})
+        description = description['content'] if description else "No description"
+        
+        # 本文の取得
         paragraphs = soup.find_all('p')
         content = ' '.join([p.text for p in paragraphs])
-        summary = content[:500] + "..." if len(content) > 500 else content
+        
+        # 長すぎる場合は切り詰める
+        max_content_length = 5000  # 適宜調整してください
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "..."
+        
+        # AIモデルによる要約
+        summary = summarize_with_ai(title, description, content, model_choice)
+        
         return summary
     except Exception as e:
         return f"エラーが発生しました: {str(e)}"
 
-# 関連する過去の会話を選択する関数
-def select_relevant_conversations(query, chat_history, top_n=3):
-    if not chat_history:
-        return []
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform([query] + [conv['summary_title'] for conv in chat_history])
-    cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
-    related_docs_indices = cosine_similarities.argsort()[:-top_n-1:-1]
-    return [chat_history[i] for i in related_docs_indices]
+# AIモデルによる要約関数
+def summarize_with_ai(title, description, content, model_choice):
+    prompt = f"""以下のウェブページの内容を要約してください。
+タイトル: {title}
+説明: {description}
+本文:
+{content}
 
-# コンテキストを取得する関数
-def get_context(current_query, chat_history, max_tokens=1000):
-    context = []
-    total_tokens = 0
-    relevant_history = select_relevant_conversations(current_query, chat_history)
-    for conversation in relevant_history:
-        summary = conversation['summary_title']
-        messages = conversation['messages']
-        if isinstance(summary, str):
-            if total_tokens + len(summary.split()) > max_tokens:
-                break
-            context.append(f"過去の関連会話: {summary}")
-            total_tokens += len(summary.split())
-        for msg in messages:
-            content = msg.get('content', '')
-            if isinstance(content, str):
-                if total_tokens + len(content.split()) > max_tokens:
-                    break
-                context.append(f"{msg['role']}: {content}")
-                total_tokens += len(content.split())
-    return '\n\n'.join(context)
-
-# Cohereを使用した会話機能（ストリーミング対応）
-def cohere_chat_stream(prompt):
-    response = co.chat_stream(
-        model="command-r-plus-08-2024",
-        message=prompt,
-        temperature=0.5,
-        max_tokens=4096
-    )
-    for event in response:
-        if event.event_type == "text-generation":
-            yield event.text
-
-# Groqを使用した会話機能（ストリーミング対応）
-def groq_chat_stream(prompt):
-    chat_history = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt}
-    ]
-    response = groq_client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=chat_history,
-        max_tokens=5000,
-        temperature=0.5,
-        stream=True
-    )
-    for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            yield chunk.choices[0].delta.content
+要約:"""
+    
+    if model_choice == "OpenAI GPT-4o-mini":
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
+    
+    elif model_choice == "Claude 3.5 Sonnet":
+        response = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.content[0].text
+    
+    elif model_choice == "Gemini 1.5 flash":
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    
+    elif model_choice == "Cohere Command-R Plus":
+        response = co.summarize(
+            text=content,
+            length='medium',
+            format='paragraph',
+            model='command-r-plus-08-2024',
+            additional_command=f"Title: {title}\nDescription: {description}"
+        )
+        return response.summary
+    
+    else:  # Groq llama3-70b-8192
+        response = groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
 
 # メッセージの役割を適切に変換する関数
 def convert_role_for_api(role):
@@ -167,7 +177,15 @@ def display_html_preview(html_content):
     components.iframe(html_data_url, height=600, scrolling=True)
 
 # AIモデルにプロンプトを送信し、応答を生成
-def generate_response(ai_prompt, model_choice, memory):
+def generate_response(prompt, model_choice, memory):
+    url = detect_url(prompt)
+    if url:
+        summary = scrape_and_summarize(url, model_choice)
+        full_response = f"ウェブページの要約:\n\n{summary}\n\n元のURL: {url}"
+        yield full_response
+        memory.chat_memory.add_ai_message(full_response)
+        return
+
     full_response = ""
     chat_history = memory.chat_memory.messages
     
@@ -175,7 +193,7 @@ def generate_response(ai_prompt, model_choice, memory):
         if model_choice == "OpenAI GPT-4o-mini":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
-            ] + [{"role": "user", "content": ai_prompt}]
+            ] + [{"role": "user", "content": prompt}]
             
             for chunk in openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -189,7 +207,7 @@ def generate_response(ai_prompt, model_choice, memory):
         elif model_choice == "Claude 3.5 Sonnet":
             messages = [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
-            ] + [{"role": "user", "content": ai_prompt}]
+            ] + [{"role": "user", "content": prompt}]
             
             formatted_messages = format_messages_for_claude(messages)
             
@@ -206,7 +224,7 @@ def generate_response(ai_prompt, model_choice, memory):
         elif model_choice == "Gemini 1.5 flash":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
-            ] + [{"role": "user", "content": ai_prompt}]
+            ] + [{"role": "user", "content": prompt}]
             
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content([m["content"] for m in messages], stream=True)
@@ -215,12 +233,12 @@ def generate_response(ai_prompt, model_choice, memory):
                 yield full_response
 
         elif model_choice == "Cohere Command-R Plus":
-            for chunk in cohere_chat_stream(ai_prompt):
+            for chunk in cohere_chat_stream(prompt):
                 full_response += chunk
                 yield full_response
 
         else:  # Groq llama3-70b-8192
-            for chunk in groq_chat_stream(ai_prompt):
+            for chunk in groq_chat_stream(prompt):
                 full_response += chunk
                 yield full_response
 
