@@ -20,8 +20,9 @@ from streamlit_custom_login import login_page, logout
 load_dotenv()  # .envファイルの内容を環境変数としてロードする
 
 # Firebaseの初期化
+firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
+
 if not firebase_admin._apps:
-    firebase_credentials = json.loads(st.secrets['FIREBASE']['CREDENTIALS_JSON'])
     cred = credentials.Certificate(firebase_credentials)
     firebase_admin.initialize_app(cred)
 
