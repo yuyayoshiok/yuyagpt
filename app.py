@@ -30,6 +30,7 @@ SYSTEM_PROMPT = (
     "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
 )
 
+
 # .envファイルの再読み込み関数
 def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -145,6 +146,14 @@ def format_messages_for_claude(messages):
             formatted_messages.append(message)
     return formatted_messages
 
+# テキストのクリーニング関数
+def clean_text(text):
+    # 連続する重複を除去
+    cleaned = re.sub(r'(.+?)\1+', r'\1', text)
+    # 余分な空白を除去
+    cleaned = ' '.join(cleaned.split())
+    return cleaned
+
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(ai_prompt, model_choice, memory):
     full_response = ""
@@ -163,7 +172,7 @@ def generate_response(ai_prompt, model_choice, memory):
             ):
                 if chunk.choices[0].delta.content is not None:
                     full_response += chunk.choices[0].delta.content
-                    yield full_response
+                    yield clean_text(full_response)
 
         elif model_choice == "Claude 3.5 Sonnet":
             messages = [
@@ -180,7 +189,7 @@ def generate_response(ai_prompt, model_choice, memory):
             ) as stream:
                 for text in stream.text_stream:
                     full_response += text
-                    yield full_response
+                    yield clean_text(full_response)
 
         elif model_choice == "Gemini 1.5 flash":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
@@ -191,24 +200,31 @@ def generate_response(ai_prompt, model_choice, memory):
             response = model.generate_content([m["content"] for m in messages], stream=True)
             for chunk in response:
                 full_response += chunk.text
-                yield full_response
+                yield clean_text(full_response)
 
         elif model_choice == "Cohere Command-R Plus":
             for chunk in cohere_chat_stream(ai_prompt):
                 full_response += chunk
-                yield full_response
+                yield clean_text(full_response)
 
         else:  # Groq llama3-70b-8192
             for chunk in groq_chat_stream(ai_prompt):
                 full_response += chunk
-                yield full_response
+                yield clean_text(full_response)
 
         # 会話履歴に応答を追加
-        memory.chat_memory.add_ai_message(full_response)
+        memory.chat_memory.add_ai_message(clean_text(full_response))
 
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
         yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
+
+# HTMLコンテンツを抽出する関数
+def extract_html_content(text):
+    html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', text)
+    if html_blocks:
+        return html_blocks[0]
+    return None
 
 # 起動時に.envファイルを読み込む
 reload_env()
@@ -254,14 +270,14 @@ if prompt := st.chat_input("質問を入力してください"):
         try:
             full_response = ""
             for response in generate_response(prompt, model_choice, st.session_state.memory):
-                full_response += response
+                full_response = response  # クリーニング済みの応答を使用
                 message_placeholder.markdown(full_response + "▌")
             message_placeholder.markdown(full_response)
             
-            # HTMLコンテンツの抽出（例：コード内のHTMLブロックを検出）
-            html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', full_response)
-            if html_blocks:
-                st.session_state.html_content = html_blocks[0]
+            # HTMLコンテンツの抽出
+            html_content = extract_html_content(full_response)
+            if html_content:
+                st.session_state.html_content = html_content
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
             message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
