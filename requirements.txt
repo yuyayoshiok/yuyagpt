@@ -9,5 +9,7 @@
    python-dotenv
    streamlit
    chardet
+   streamlit-option-menu==0.3.2
    cohere
    groq
+   streamlit-custom-login
