@@ -326,4 +326,3 @@ if st.button("会話履歴をクリア"):
 st.subheader("デバッグ情報")
 st.write(f"セッション状態のキー: {list(st.session_state.keys())}")
 st.write(f"HTMLコンテンツの有無: {'あり' if st.session_state.html_content else 'なし'}")
-```
