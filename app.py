@@ -18,6 +18,7 @@ import json
 import time
 import streamlit_authenticator as stauth
 import yaml
+import bcrypt
 
 # 起動時に.envファイルを読み込む
 load_dotenv()
