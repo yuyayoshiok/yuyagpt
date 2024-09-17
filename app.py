@@ -220,41 +220,6 @@ def generate_response(ai_prompt, model_choice, memory):
         st.error(f"エラーが発生しました: {str(e)}")
         yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
 
-import os
-import re
-import base64
-import tempfile
-from dotenv import load_dotenv
-import streamlit as st
-import streamlit.components.v1 as components
-from openai import OpenAI
-from anthropic import Anthropic
-import google.generativeai as genai
-import cohere
-from groq import Groq
-import requests
-from bs4 import BeautifulSoup
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import json
-import time
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain.memory import ConversationBufferMemory
-
-# .envファイルを読み込む
-load_dotenv()
-
-# システムプロンプトの定義
-SYSTEM_PROMPT = (
-    "あなたはプロのエンジニアでありプログラマーです。"
-    "GAS、Pythonから始まり多岐にわたるプログラミング言語を習得しています。"
-    "あなたが出力するコードは完璧で、省略することなく完全な全てのコードを出力するのがあなたの仕事です。"
-    "チャットでは日本語で応対してください。"
-    "制約条件として、出力した文章とプログラムコード（コードブロック）は分けて出力してください。"
-)
-
-# ... (他の関数は変更なし) ...
-
 # HTMLコンテンツを抽出する関数
 def extract_html_content(text):
     html_blocks = re.findall(r'```html\n([\s\S]*?)\n```', text)
@@ -324,21 +289,34 @@ if prompt := st.chat_input("質問を入力してください"):
             html_content = extract_html_content(full_response)
             if html_content:
                 st.session_state.html_content = html_content
+                st.success("HTMLコンテンツが抽出されました。")  # デバッグ用
+            else:
+                st.warning("HTMLコンテンツが見つかりませんでした。")  # デバッグ用
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
             message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
 
 # HTMLコンテンツの表示
 if st.session_state.html_content:
+    st.success(f"HTMLコンテンツの長さ: {len(st.session_state.html_content)} 文字")  # デバッグ用
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
         with tab1:
+            st.subheader("HTMLプレビュー")
             display_html_preview(st.session_state.html_content)
         with tab2:
+            st.subheader("HTMLソースコード")
             st.code(st.session_state.html_content, language="html")
+else:
+    st.info("HTMLコンテンツがありません。HTMLを含む応答を生成してください。")
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.memory.clear()
     st.session_state.html_content = ""
     st.rerun()  # 最新のStreamlit APIを使用してページを再読み込み
+
+# デバッグ情報の表示
+st.subheader("デバッグ情報")
+st.write(f"セッション状態のキー: {list(st.session_state.keys())}")
+st.write(f"HTMLコンテンツの有無: {'あり' if st.session_state.html_content else 'なし'}")
