@@ -295,16 +295,12 @@ if prompt := st.chat_input("質問を入力してください"):
             html_content = extract_html_content(full_response)
             if html_content:
                 st.session_state.html_content = html_content
-                st.success("HTMLコンテンツが抽出されました。")
-            else:
-                st.warning("HTMLコンテンツが見つかりませんでした。")
         except Exception as e:
             st.error(f"エラーが発生しました: {str(e)}")
             message_placeholder.markdown("申し訳ありません。エラーが発生しました。もう一度お試しください。")
 
 # HTMLコンテンツの表示
 if st.session_state.html_content:
-    st.success(f"HTMLコンテンツの長さ: {len(st.session_state.html_content)} 文字")
     with main:
         tab1, tab2 = st.tabs(["プレビュー", "ソースコード"])
         with tab1:
@@ -313,16 +309,9 @@ if st.session_state.html_content:
         with tab2:
             st.subheader("HTMLソースコード")
             st.code(st.session_state.html_content, language="html")
-else:
-    st.info("HTMLコンテンツがありません。HTMLを含む応答を生成してください。")
 
 # 会話履歴のクリアボタン
 if st.button("会話履歴をクリア"):
     st.session_state.memory.clear()
     st.session_state.html_content = ""
     st.rerun()  # 最新のStreamlit APIを使用してページを再読み込み
-
-# デバッグ情報の表示
-st.subheader("デバッグ情報")
-st.write(f"セッション状態のキー: {list(st.session_state.keys())}")
-st.write(f"HTMLコンテンツの有無: {'あり' if st.session_state.html_content else 'なし'}")
