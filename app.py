@@ -279,6 +279,76 @@ def generate_response(prompt, model_choice, memory):
                     full_response += chunk.choices[0].delta.content
                     yield full_response
 
+        elif model_choice == "Claude 3.5 Sonnet":
+            messages = [
+                {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
+            ] + [{"role": "user", "content": prompt}]
+            if search_results or error_message:
+                messages.append({"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
+            
+            formatted_messages = format_messages_for_claude(messages)
+            
+            with anthropic_client.messages.stream(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=8000,
+                system=SYSTEM_PROMPT,
+                messages=formatted_messages
+            ) as stream:
+                for text in stream.text_stream:
+                    full_response += text
+                    yield full_response
+
+        elif model_choice == "Gemini 1.5 flash":
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+                {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
+            ] + [{"role": "user", "content": prompt}]
+            if search_results or error_message:
+                messages.append({"role": "system", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
+            
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content([m["content"] for m in messages], stream=True)
+            for chunk in response:
+                full_response += chunk.text
+                yield full_response
+
+        elif model_choice == "Cohere Command-R Plus":
+            chat_history = [
+                {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
+                for m in st.session_state.memory.chat_memory.messages
+            ]
+            if search_results or error_message:
+                chat_history.append({"role": "CHATBOT", "message": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
+            chat_history.append({"role": "USER", "message": prompt})
+            
+            response = co.chat(
+                model='command-r-plus-08-2024',
+                message=prompt,
+                temperature=0.5,
+                chat_history=chat_history,
+            )
+            full_response += response.text
+            yield full_response
+
+        else:  # Groq llama3-70b-8192
+            chat_history = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ]
+            if search_results or error_message:
+                chat_history.insert(1, {"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.1-70b-versatile",
+                messages=chat_history,
+                max_tokens=5000,
+                temperature=0.5,
+                stream=True
+            )
+            for chunk in response:
+                if chunk.choices[0].delta.content is not None:
+                    full_response += chunk.choices[0].delta.content
+                    yield full_response
+
         # 会話履歴に応答を追加
         memory.chat_memory.add_ai_message(full_response)
 
