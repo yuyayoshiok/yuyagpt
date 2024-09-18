@@ -363,8 +363,6 @@ def main_app():
         with st.chat_message("ai"):
             message_placeholder = st.empty()
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
                 full_response = ""
                 async for response in async_generate_response(prompt, model_choice, st.session_state.memory):
                     full_response = response
@@ -400,7 +398,7 @@ def main_app():
 def main():
     reload_env()
     if check_login_status():
-        main_app()
+        asyncio.run(main_app())
     else:
         login_page()
 
