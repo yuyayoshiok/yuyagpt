@@ -126,7 +126,7 @@ def groq_chat_stream(prompt):
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
-def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
+def duckduckgo_search(prompt, max_retries=5, retry_delay=10):
     search_type = "text"
     keywords = prompt.strip()
 
@@ -163,13 +163,40 @@ def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
                 return results, search_type, None, keywords
         except DuckDuckGoSearchException as e:
             if "Ratelimit" in str(e) and attempt < max_retries - 1:
-                time.sleep(retry_delay)
+                wait_time = retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                time.sleep(wait_time)
                 continue
-            return None, search_type, f"検索中にエラーが発生しました: {str(e)}", keywords
+            if attempt == max_retries - 1:
+                return fallback_search(keywords, search_type), search_type, "DuckDuckGo検索でレート制限エラーが発生しました。代替の検索結果を表示します。", keywords
         except Exception as e:
             return None, search_type, f"予期せぬエラーが発生しました: {str(e)}", keywords
     
     return None, search_type, "リトライ回数を超えました。しばらく待ってから再度お試しください。", keywords
+
+def fallback_search(keywords, search_type):
+    try:
+        url = f"https://www.google.com/search?q={keywords}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+        
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        results = []
+        for g in soup.find_all('div', class_='g'):
+            anchors = g.find_all('a')
+            if anchors:
+                link = anchors[0]['href']
+                title = g.find('h3', class_='r')
+                title = title.text if title else 'No title'
+                item = {'title': title, 'href': link}
+                results.append(item)
+            if len(results) >= 3:
+                break
+        
+        return results
+    except Exception as e:
+        st.error(f"フォールバック検索中にエラーが発生しました: {str(e)}")
+        return []
 
 def generate_response(prompt, model_choice, memory):
     search_results, search_type, error_message, used_keywords = duckduckgo_search(prompt)
@@ -202,8 +229,8 @@ print(results)
 
     with tab2:
         if error_message:
-            st.error(f"検索エラー: {error_message}")
-        elif search_results:
+            st.warning(f"検索エラー: {error_message}")
+        if search_results:
             st.success(f"検索キーワード: {used_keywords}")
             st.json(search_results)
         else:
@@ -211,9 +238,9 @@ print(results)
 
     try:
         if error_message:
-            full_response += f"検索エラー: {error_message}\n\n"
-        elif search_results:
-            full_response += f"DuckDuckGo検索結果 ({search_type}):\n\n"
+            full_response += f"検索情報: {error_message}\n\n"
+        if search_results:
+            full_response += f"検索結果 ({search_type}):\n\n"
             for result in search_results:
                 if search_type == "text":
                     full_response += f"- {result.get('body', 'No body')}\n  URL: {result.get('href', 'No URL')}\n\n"
@@ -226,6 +253,7 @@ print(results)
             
             full_response += "\n検索結果の解釈：\n"
 
+        # AIモデルによる応答生成（この部分は変更なし）
         if model_choice == "OpenAI GPT-4o-mini":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
@@ -292,7 +320,7 @@ print(results)
             full_response += response.text
             yield full_response
 
-        else:  # Groq llama3-70b-8192
+        else:  # Groq llama-3.1-70b-versatile
             chat_history = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
@@ -301,7 +329,7 @@ print(results)
                 chat_history.insert(1, {"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             response = groq_client.chat.completions.create(
-                model="llama3-70b-8192",
+                model="llama-3.1-70b-versatile",
                 messages=chat_history,
                 max_tokens=5000,
                 temperature=0.5,
