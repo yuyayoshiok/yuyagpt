@@ -100,7 +100,7 @@ def display_html_preview(html_content):
     components.iframe(html_data_url, height=600, scrolling=True)
 
 @lru_cache(maxsize=100)
-def cached_duckduckgo_search(keywords, search_type):
+def duckduckgo_search(keywords, search_type):
     with DDGS() as ddgs:
         if search_type == "text":
             return list(ddgs.text(keywords, region="jp-jp", max_results=3))
