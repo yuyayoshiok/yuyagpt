@@ -12,14 +12,12 @@ from groq import Groq
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 import hashlib
-import time
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
-import streamlit as st
-import random
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
-
-
+import time
+import asyncio
+import aiohttp
+from functools import lru_cache
 
 # .envファイルを読み込む
 load_dotenv()
@@ -38,6 +36,12 @@ GAS、Pythonから始まり多岐にわたるプログラミング言語を習�
 USERS = {
     "yuyayoshiok@gmail.com": hashlib.sha256("Yoshi0731".encode()).hexdigest(),
 }
+
+# グローバル変数の定義
+openai_client = None
+anthropic_client = None
+co = None
+groq_client = None
 
 # .envファイルの再読み込み関数
 def reload_env():
@@ -97,71 +101,19 @@ def display_html_preview(html_content):
     html_data_url = get_html_data_url(html_content)
     components.iframe(html_data_url, height=600, scrolling=True)
 
-# Cohereを使用した会話機能（ストリーミング対応、新しいSDKバージョンに対応）
-def cohere_chat_stream(prompt):
-    chat_history = [
-        {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
-        for m in st.session_state.memory.chat_memory.messages
-    ]
-    response = co.chat_stream(
-        model='command-r-plus-08-2024',
-        message=prompt,
-        temperature=0.5,
-        chat_history=chat_history,
-    )
-    for event in response:
-        if event.event_type == "text-generation":
-            yield event.text
-
-# Groqを使用した会話機能（ストリーミング対応）
-def groq_chat_stream(prompt):
-    chat_history = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt}
-    ]
-    response = groq_client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=chat_history,
-        max_tokens=5000,
-        temperature=0.5,
-        stream=True
-    )
-    for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            yield chunk.choices[0].delta.content
-
-# DuckDuckGo検索機能
-def duckduckgo_search(prompt):
-    search_type = "text"
-    keywords = prompt
-
-    if "画像" in prompt and "調べて" in prompt:
-        search_type = "images"
-        keywords = prompt.replace("画像を調べて", "").strip()
-    elif "動画" in prompt and "調べて" in prompt:
-        search_type = "videos"
-        keywords = prompt.replace("動画を調べて", "").strip()
-    elif "ニュース" in prompt and "調べて" in prompt:
-        search_type = "news"
-        keywords = prompt.replace("最新のニュースを調べて", "").replace("ニュースを調べて", "").strip()
-    elif "調べて" in prompt:
-        keywords = prompt.replace("調べて", "").strip()
-
-    try:
+@lru_cache(maxsize=100)
+def cached_duckduckgo_search(keywords, search_type):
+    with DDGS() as ddgs:
         if search_type == "text":
-            results = DDGS().text(keywords, region="jp-jp", max_results=3)
+            return list(ddgs.text(keywords, region="jp-jp", max_results=3))
         elif search_type == "images":
-            results = DDGS().images(keywords, region="jp-jp", safesearch="moderate", max_results=3)
+            return list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
         elif search_type == "videos":
-            results = DDGS().videos(keywords, region="jp-jp", safesearch="moderate", max_results=3)
+            return list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
         elif search_type == "news":
-            results = DDGS().news(keywords, region="jp-jp", max_results=3)
-        return list(results), search_type
-    except Exception as e:
-        st.error(f"検索中にエラーが発生しました: {str(e)}")
-        return None, search_type
+            return list(ddgs.news(keywords, region="jp-jp", max_results=3))
 
-def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
+async def async_duckduckgo_search(prompt, max_retries=3, retry_delay=5):
     search_type = "text"
     keywords = prompt.strip()
 
@@ -177,7 +129,7 @@ def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
     elif "調べて" in prompt:
         keywords = prompt.replace("調べて", "").strip()
     else:
-        return None, None, None, None  # 検索トリガーがない場合は検索を実行しない
+        return None, None, None, None
 
     if not keywords:
         if search_type == "news":
@@ -187,19 +139,11 @@ def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
 
     for attempt in range(max_retries):
         try:
-            with DDGS() as ddgs:
-                if search_type == "text":
-                    results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
-                elif search_type == "images":
-                    results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-                elif search_type == "videos":
-                    results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-                elif search_type == "news":
-                    results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
-                return results, search_type, None, keywords
+            results = await asyncio.to_thread(cached_duckduckgo_search, keywords, search_type)
+            return results, search_type, None, keywords
         except DuckDuckGoSearchException as e:
             if "Ratelimit" in str(e) and attempt < max_retries - 1:
-                time.sleep(retry_delay)
+                await asyncio.sleep(retry_delay)
                 continue
             return None, search_type, f"検索中にエラーが発生しました: {str(e)}", keywords
         except Exception as e:
@@ -207,8 +151,8 @@ def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
     
     return None, search_type, "リトライ回数を超えました。しばらく待ってから再度お試しください。", keywords
 
-def generate_response(prompt, model_choice, memory):
-    search_results, search_type, error_message, used_keywords = duckduckgo_search(prompt)
+async def async_generate_response(prompt, model_choice, memory):
+    search_results, search_type, error_message, used_keywords = await async_duckduckgo_search(prompt)
     
     full_response = ""
     chat_history = memory.chat_memory.messages
@@ -219,22 +163,22 @@ def generate_response(prompt, model_choice, memory):
         
         with tab1:
             st.code(f"""
-    from duckduckgo_search import DDGS
+from duckduckgo_search import DDGS
 
-    keywords = "{used_keywords}"
-    search_type = "{search_type}"
+keywords = "{used_keywords}"
+search_type = "{search_type}"
 
-    with DDGS() as ddgs:
-        if search_type == "text":
-            results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
-        elif search_type == "images":
-            results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-        elif search_type == "videos":
-            results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-        elif search_type == "news":
-            results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
+with DDGS() as ddgs:
+    if search_type == "text":
+        results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
+    elif search_type == "images":
+        results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
+    elif search_type == "videos":
+        results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
+    elif search_type == "news":
+        results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
 
-    print(results)
+print(results)
             """)
 
         with tab2:
@@ -270,7 +214,7 @@ def generate_response(prompt, model_choice, memory):
             if search_results:
                 messages.append({"role": "system", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
-            for chunk in openai_client.chat.completions.create(
+            async for chunk in await openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
                 stream=True
@@ -283,18 +227,18 @@ def generate_response(prompt, model_choice, memory):
             messages = [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
-            if search_results or error_message:
+            if search_results:
                 messages.append({"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             formatted_messages = format_messages_for_claude(messages)
             
-            with anthropic_client.messages.stream(
+            async with anthropic_client.messages.stream(
                 model="claude-3-5-sonnet-20240620",
                 max_tokens=8000,
                 system=SYSTEM_PROMPT,
                 messages=formatted_messages
             ) as stream:
-                for text in stream.text_stream:
+                async for text in stream.text_stream:
                     full_response += text
                     yield full_response
 
@@ -302,25 +246,24 @@ def generate_response(prompt, model_choice, memory):
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
-            if search_results or error_message:
+            if search_results:
                 messages.append({"role": "system", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content([m["content"] for m in messages], stream=True)
-            for chunk in response:
-                full_response += chunk.text
-                yield full_response
+            response = await asyncio.to_thread(model.generate_content, [m["content"] for m in messages])
+            full_response += response.text
+            yield full_response
 
         elif model_choice == "Cohere Command-R Plus":
             chat_history = [
                 {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
-                for m in st.session_state.memory.chat_memory.messages
+                for m in memory.chat_memory.messages
             ]
-            if search_results or error_message:
+            if search_results:
                 chat_history.append({"role": "CHATBOT", "message": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             chat_history.append({"role": "USER", "message": prompt})
             
-            response = co.chat(
+            response = await asyncio.to_thread(co.chat,
                 model='command-r-plus-08-2024',
                 message=prompt,
                 temperature=0.5,
@@ -334,22 +277,23 @@ def generate_response(prompt, model_choice, memory):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ]
-            if search_results or error_message:
+            if search_results:
                 chat_history.insert(1, {"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
-            response = groq_client.chat.completions.create(
-                model="llama-3.1-70b-versatile",
+            async for chunk in await groq_client.chat.completions.create(
+                model="llama3-70b-8192",
                 messages=chat_history,
                 max_tokens=5000,
                 temperature=0.5,
                 stream=True
-            )
-            for chunk in response:
+            ):
                 if chunk.choices[0].delta.content is not None:
                     full_response += chunk.choices[0].delta.content
                     yield full_response
 
         # 会話履歴に応答を追加
+        memory.chat_memory.add_ai_message(full_response)
+# 会話履歴に応答を追加
         memory.chat_memory.add_ai_message(full_response)
 
     except Exception as e:
@@ -374,23 +318,7 @@ def login_page():
         else:
             st.error("ユーザー名またはパスワードが間違っています。")
 
-def generate_response_with_timeout(prompt, model_choice, memory, timeout=60):
-    def generate():
-        try:
-            for response in generate_response(prompt, model_choice, memory):
-                yield response
-        except Exception as e:
-            st.error(f"応答生成中にエラーが発生しました: {str(e)}")
-            yield "エラーが発生しました。もう一度お試しください。"
-
-    with ThreadPoolExecutor() as executor:
-        future = executor.submit(lambda: list(generate()))
-        try:
-            result = future.result(timeout=timeout)
-            return result[-1] if result else "タイムアウトにより応答を生成できませんでした。"
-        except TimeoutError:
-            return "応答生成がタイムアウトしました。もう一度お試しください。"
-
+# メイン機能の関数
 def main_app():
     st.title("YuyaGPT")
 
@@ -435,13 +363,14 @@ def main_app():
         with st.chat_message("ai"):
             message_placeholder = st.empty()
             try:
-                start_time = time.time()
-                full_response = generate_response_with_timeout(prompt, model_choice, st.session_state.memory)
-                end_time = time.time()
-                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                full_response = ""
+                async for response in async_generate_response(prompt, model_choice, st.session_state.memory):
+                    full_response = response
+                    message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
-                st.sidebar.write(f"応答生成時間: {end_time - start_time:.2f}秒")
-
+                
                 # HTMLコンテンツの抽出
                 html_content = extract_html_content(full_response)
                 if html_content:
