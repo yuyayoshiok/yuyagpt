@@ -15,6 +15,7 @@ import hashlib
 import time
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
+import streamlit as st
 
 # .envファイルを読み込む
 load_dotenv()
@@ -125,11 +126,6 @@ def groq_chat_stream(prompt):
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
-import time
-from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import DuckDuckGoSearchException
-
-# DuckDuckGo検索機能
 def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
     search_type = "text"
     keywords = prompt.strip()
@@ -147,7 +143,11 @@ def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
         keywords = prompt.replace("調べて", "").strip()
 
     if not keywords:
-        return None, search_type, "検索キーワードが指定されていません。"
+        if "ニュース" in prompt:
+            keywords = "今日のトップニュース"
+            search_type = "news"
+        else:
+            keywords = "最新のトレンド"
 
     for attempt in range(max_retries):
         try:
@@ -160,24 +160,55 @@ def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
                     results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
                 elif search_type == "news":
                     results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
-                return results, search_type, None
+                return results, search_type, None, keywords
         except DuckDuckGoSearchException as e:
             if "Ratelimit" in str(e) and attempt < max_retries - 1:
                 time.sleep(retry_delay)
                 continue
-            return None, search_type, f"検索中にエラーが発生しました: {str(e)}"
+            return None, search_type, f"検索中にエラーが発生しました: {str(e)}", keywords
         except Exception as e:
-            return None, search_type, f"予期せぬエラーが発生しました: {str(e)}"
+            return None, search_type, f"予期せぬエラーが発生しました: {str(e)}", keywords
     
-    return None, search_type, "リトライ回数を超えました。しばらく待ってから再度お試しください。"
+    return None, search_type, "リトライ回数を超えました。しばらく待ってから再度お試しください。", keywords
 
-# AIモデルにプロンプトを送信し、応答を生成
 def generate_response(prompt, model_choice, memory):
-    search_results, search_type, error_message = duckduckgo_search(prompt)
+    search_results, search_type, error_message, used_keywords = duckduckgo_search(prompt)
     
     full_response = ""
     chat_history = memory.chat_memory.messages
     
+    # 検索プロセスと結果を表示するタブを作成
+    tab1, tab2 = st.tabs(["コード", "実行結果"])
+    
+    with tab1:
+        st.code(f"""
+from duckduckgo_search import DDGS
+
+keywords = "{used_keywords}"
+search_type = "{search_type}"
+
+with DDGS() as ddgs:
+    if search_type == "text":
+        results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
+    elif search_type == "images":
+        results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
+    elif search_type == "videos":
+        results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
+    elif search_type == "news":
+        results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
+
+print(results)
+        """)
+
+    with tab2:
+        if error_message:
+            st.error(f"検索エラー: {error_message}")
+        elif search_results:
+            st.success(f"検索キーワード: {used_keywords}")
+            st.json(search_results)
+        else:
+            st.warning("検索結果がありませんでした。")
+
     try:
         if error_message:
             full_response += f"検索エラー: {error_message}\n\n"
@@ -191,7 +222,7 @@ def generate_response(prompt, model_choice, memory):
                 elif search_type == "videos":
                     full_response += f"動画: {result.get('title', 'No title')}\n  URL: {result.get('content', 'No URL')}\n\n"
                 elif search_type == "news":
-                    full_response += f"- {result.get('body', 'No body')}\n  URL: {result.get('url', 'No URL')}\n  日付: {result.get('date', 'No date')}\n\n"
+                    full_response += f"- {result.get('title', 'No title')}: {result.get('body', 'No body')}\n  URL: {result.get('url', 'No URL')}\n  日付: {result.get('date', 'No date')}\n\n"
             
             full_response += "\n検索結果の解釈：\n"
 
