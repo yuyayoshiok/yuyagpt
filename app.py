@@ -272,7 +272,7 @@ print(results)
             full_response += response.text
             yield full_response
 
-        else:  # Groq llama3-70b-8192
+        else:  # Groq llama-3.1-70b-versatile
             chat_history = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
@@ -281,7 +281,7 @@ print(results)
                 chat_history.insert(1, {"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             async for chunk in await groq_client.chat.completions.create(
-                model="llama3-70b-8192",
+                model="llama-3.1-70b-versatile",
                 messages=chat_history,
                 max_tokens=5000,
                 temperature=0.5,
