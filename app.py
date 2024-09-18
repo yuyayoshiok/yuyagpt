@@ -1,15 +1,9 @@
-import streamlit as st
-import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import DuckDuckGoSearchException
-import requests
-from bs4 import BeautifulSoup
-import random
-
-# 他の必要なインポートをここに追加
-from dotenv import load_dotenv
 import os
+import re
+import base64
+from dotenv import load_dotenv
+import streamlit as st
+import streamlit.components.v1 as components
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
@@ -17,6 +11,15 @@ import cohere
 from groq import Groq
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
+import hashlib
+import time
+from duckduckgo_search import DDGS
+from duckduckgo_search.exceptions import DuckDuckGoSearchException
+import streamlit as st
+import random
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+
 
 # .envファイルを読み込む
 load_dotenv()
