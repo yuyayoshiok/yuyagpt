@@ -16,6 +16,7 @@ from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
 import time
 from functools import lru_cache
+from duckduckgo_search import DDGS
 
 # .envファイルを読み込む
 load_dotenv()
@@ -99,19 +100,7 @@ def display_html_preview(html_content):
     html_data_url = get_html_data_url(html_content)
     components.iframe(html_data_url, height=600, scrolling=True)
 
-@lru_cache(maxsize=100)
-def cached_duckduckgo_search(keywords, search_type):
-    with DDGS() as ddgs:
-        if search_type == "text":
-            return list(ddgs.text(keywords, region="jp-jp", max_results=3))
-        elif search_type == "images":
-            return list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-        elif search_type == "videos":
-            return list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-        elif search_type == "news":
-            return list(ddgs.news(keywords, region="jp-jp", max_results=3))
-
-async def async_duckduckgo_search(prompt, max_retries=3, retry_delay=5):
+def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
     search_type = "text"
     keywords = prompt.strip()
 
@@ -127,7 +116,7 @@ async def async_duckduckgo_search(prompt, max_retries=3, retry_delay=5):
     elif "調べて" in prompt:
         keywords = prompt.replace("調べて", "").strip()
     else:
-        return None, None, None, None
+        return None, None, None, None  # 検索トリガーがない場合は検索を実行しない
 
     if not keywords:
         if search_type == "news":
@@ -137,11 +126,19 @@ async def async_duckduckgo_search(prompt, max_retries=3, retry_delay=5):
 
     for attempt in range(max_retries):
         try:
-            results = await asyncio.to_thread(cached_duckduckgo_search, keywords, search_type)
-            return results, search_type, None, keywords
+            with DDGS() as ddgs:
+                if search_type == "text":
+                    results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
+                elif search_type == "images":
+                    results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
+                elif search_type == "videos":
+                    results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
+                elif search_type == "news":
+                    results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
+                return results, search_type, None, keywords
         except DuckDuckGoSearchException as e:
             if "Ratelimit" in str(e) and attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay)
+                time.sleep(retry_delay)
                 continue
             return None, search_type, f"検索中にエラーが発生しました: {str(e)}", keywords
         except Exception as e:
@@ -161,7 +158,8 @@ def generate_response(prompt, model_choice, memory):
         
         with tab1:
             st.code(f"""
-from duckduckgo_search import DDGS
+                    
+
 
 keywords = "{used_keywords}"
 search_type = "{search_type}"
