@@ -336,7 +336,7 @@ print(results)
                 chat_history.insert(1, {"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             response = groq_client.chat.completions.create(
-                model="llama3-70b-8192",
+                model="llama-3.1-70b-versatile",
                 messages=chat_history,
                 max_tokens=5000,
                 temperature=0.5,
@@ -353,6 +353,33 @@ print(results)
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
         yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
+
+# ログイン状態の確認
+def check_login_status():
+    return st.session_state.get('logged_in', False)
+
+# ログインページ
+def login_page():
+    st.title("ログイン")
+    username = st.text_input("ユーザー名")
+    password = st.text_input("パスワード", type="password")
+    if st.button("ログイン"):
+        if username in USERS and USERS[username] == hashlib.sha256(password.encode()).hexdigest():
+            st.session_state['logged_in'] = True
+            st.session_state['username'] = username
+            st.success("ログインに成功しました。")
+            st.rerun()
+        else:
+            st.error("ユーザー名またはパスワードが間違っています。")
+
+def generate_response_with_timeout(prompt, model_choice, memory, timeout=60):
+    def generate():
+        try:
+            for response in generate_response(prompt, model_choice, memory):
+                yield response
+        except Exception as e:
+            st.error(f"応答生成中にエラーが発生しました: {str(e)}")
+            yield "エラーが発生しました。もう一度お試しください。"
 
     with ThreadPoolExecutor() as executor:
         future = executor.submit(lambda: list(generate()))
