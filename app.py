@@ -140,119 +140,68 @@ def duckduckgo_search(prompt):
     elif "調べて" in prompt:
         keywords = prompt.replace("調べて", "").strip()
 
-    tab1, tab2 = st.tabs(["コード", "実行結果"])
-    
-    with tab1:
-        if search_type == "text":
-            st.code(
-                f"""
-                from duckduckgo_search import DDGS
-                results = DDGS().text("{keywords}", region="jp-jp", max_results=3)
-                print(results)
-                """
-            )
-        elif search_type == "images":
-            st.code(
-                f"""
-                from duckduckgo_search import DDGS
-                results = DDGS().images(
-                    keywords="{keywords}",
-                    region="jp-jp",
-                    safesearch="moderate",
-                    max_results=1,
-                )
-                print(results)
-                """
-            )
-        elif search_type == "videos":
-            st.code(
-                f"""
-                from duckduckgo_search import DDGS
-                results = DDGS().videos(
-                    keywords="{keywords}",
-                    region="jp-jp",
-                    safesearch="moderate",
-                    timelimit="w",
-                    resolution="high",
-                    duration="medium",
-                    max_results=1,
-                )
-                print(results)
-                """
-            )
-        elif search_type == "news":
-            st.code(
-                f"""
-                from duckduckgo_search import DDGS
-                results = DDGS().news(
-                    keywords="{keywords}",
-                    region="jp-jp",
-                    safesearch="moderate",
-                    timelimit="m",
-                    max_results=2,
-                )
-                print(results)
-                """
-            )
+    results = []
+    if search_type == "text":
+        results = DDGS().text(keywords, region="jp-jp", max_results=3)
+    elif search_type == "images":
+        results = DDGS().images(
+            keywords=keywords,
+            region="jp-jp",
+            safesearch="moderate",
+            max_results=3,
+        )
+    elif search_type == "videos":
+        results = DDGS().videos(
+            keywords=keywords,
+            region="jp-jp",
+            safesearch="moderate",
+            timelimit="w",
+            resolution="high",
+            duration="medium",
+            max_results=3,
+        )
+    elif search_type == "news":
+        results = DDGS().news(
+            keywords=keywords,
+            region="jp-jp",
+            safesearch="moderate",
+            timelimit="m",
+            max_results=3,
+        )
 
-    with tab2:
-        if st.button("Search"):
-            st.write("実行結果")
-            if search_type == "text":
-                results = DDGS().text(keywords, region="jp-jp", max_results=3)
-                st.write(results)
-            elif search_type == "images":
-                results = DDGS().images(
-                    keywords=keywords,
-                    region="jp-jp",
-                    safesearch="moderate",
-                    max_results=1,
-                )
-                st.write(results)
-                if results:
-                    st.image(results[0]["image"], caption="image")
-                    st.image(results[0]["thumbnail"], caption="thumbnail")
-            elif search_type == "videos":
-                results = DDGS().videos(
-                    keywords=keywords,
-                    region="jp-jp",
-                    safesearch="moderate",
-                    timelimit="w",
-                    resolution="high",
-                    duration="medium",
-                    max_results=1,
-                )
-                st.write(results)
-                if results:
-                    st.video(results[0]["content"])
-            elif search_type == "news":
-                results = DDGS().news(
-                    keywords=keywords,
-                    region="jp-jp",
-                    safesearch="moderate",
-                    timelimit="m",
-                    max_results=2,
-                )
-                st.write(results)
-
-    return f"DuckDuckGo検索結果: {search_type}検索 - キーワード: {keywords}"
+    return results, search_type
 
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(prompt, model_choice, memory):
-    if "調べて" in prompt:
-        search_result = duckduckgo_search(prompt)
-        yield search_result
-        memory.chat_memory.add_ai_message(search_result)
-        return
-
+    search_results = None
+    search_type = None
+    if any(keyword in prompt for keyword in ["調べて", "画像を調べて", "動画を調べて", "最新のニュースを調べて"]):
+        search_results, search_type = duckduckgo_search(prompt)
+    
     full_response = ""
     chat_history = memory.chat_memory.messages
     
     try:
+        if search_results:
+            full_response += f"DuckDuckGo検索結果 ({search_type}):\n\n"
+            for result in search_results:
+                if search_type == "text":
+                    full_response += f"- {result['title']}: {result['body']}\n  URL: {result['href']}\n\n"
+                elif search_type == "images":
+                    full_response += f"- タイトル: {result['title']}\n  画像URL: {result['image']}\n  サムネイルURL: {result['thumbnail']}\n\n"
+                elif search_type == "videos":
+                    full_response += f"- タイトル: {result['title']}\n  動画URL: {result['content']}\n  サムネイルURL: {result['images']['large']}\n\n"
+                elif search_type == "news":
+                    full_response += f"- {result['title']}: {result['body']}\n  URL: {result['url']}\n  日付: {result['date']}\n\n"
+            
+            full_response += "\n検索結果に基づく回答：\n"
+
         if model_choice == "OpenAI GPT-4o-mini":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
+            if search_results:
+                messages.append({"role": "system", "content": full_response})
             
             for chunk in openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -267,6 +216,8 @@ def generate_response(prompt, model_choice, memory):
             messages = [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
+            if search_results:
+                messages.append({"role": "assistant", "content": full_response})
             
             formatted_messages = format_messages_for_claude(messages)
             
@@ -284,6 +235,8 @@ def generate_response(prompt, model_choice, memory):
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
+            if search_results:
+                messages.append({"role": "system", "content": full_response})
             
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content([m["content"] for m in messages], stream=True)
@@ -292,14 +245,44 @@ def generate_response(prompt, model_choice, memory):
                 yield full_response
 
         elif model_choice == "Cohere Command-R Plus":
-            for chunk in cohere_chat_stream(prompt):
-                full_response += chunk
-                yield full_response
+            chat_history = [
+                {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
+                for m in st.session_state.memory.chat_memory.messages
+            ]
+            if search_results:
+                chat_history.append({"role": "CHATBOT", "message": full_response})
+            chat_history.append({"role": "USER", "message": prompt})
+            
+            response = co.chat_stream(
+                model='command-r-plus-08-2024',
+                message=prompt,
+                temperature=0.5,
+                chat_history=chat_history,
+            )
+            for event in response:
+                if event.event_type == "text-generation":
+                    full_response += event.text
+                    yield full_response
 
         else:  # Groq llama3-70b-8192
-            for chunk in groq_chat_stream(prompt):
-                full_response += chunk
-                yield full_response
+            chat_history = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ]
+            if search_results:
+                chat_history.insert(1, {"role": "assistant", "content": full_response})
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.1-70b-versatile",
+                messages=chat_history,
+                max_tokens=5000,
+                temperature=0.5,
+                stream=True
+            )
+            for chunk in response:
+                if chunk.choices[0].delta.content is not None:
+                    full_response += chunk.choices[0].delta.content
+                    yield full_response
 
         # 会話履歴に応答を追加
         memory.chat_memory.add_ai_message(full_response)
