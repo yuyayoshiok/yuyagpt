@@ -9,14 +9,13 @@ from anthropic import Anthropic
 import google.generativeai as genai
 import cohere
 from groq import Groq
+import requests
+from bs4 import BeautifulSoup
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 import hashlib
-from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import DuckDuckGoSearchException
-import time
-from functools import lru_cache
-from duckduckgo_search import DDGS
 
 # .envファイルを読み込む
 load_dotenv()
@@ -36,12 +35,6 @@ USERS = {
     "yuyayoshiok@gmail.com": hashlib.sha256("Yoshi0731".encode()).hexdigest(),
 }
 
-# グローバル変数の定義
-openai_client = None
-anthropic_client = None
-co = None
-groq_client = None
-
 # .envファイルの再読み込み関数
 def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -60,6 +53,88 @@ def reload_env():
     genai.configure(api_key=gemini_api_key)
     co = cohere.Client(api_key=cohere_api_key)
     groq_client = Groq(api_key=groq_api_key)
+
+# URLの検出関数
+def detect_url(text):
+    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+    urls = url_pattern.findall(text)
+    return urls[0] if urls else None
+
+# スクレイピングと要約の関数
+def scrape_and_summarize(url, model_choice):
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # メタデータの取得
+        title = soup.title.string if soup.title else "No title"
+        description = soup.find('meta', attrs={'name': 'description'})
+        description = description['content'] if description else "No description"
+        
+        # 本文の取得
+        paragraphs = soup.find_all('p')
+        content = ' '.join([p.text for p in paragraphs])
+        
+        # 長すぎる場合は切り詰める
+        max_content_length = 5000  # 適宜調整してください
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "..."
+        
+        # AIモデルによる要約
+        summary = summarize_with_ai(title, description, content, model_choice)
+        
+        return summary
+    except Exception as e:
+        return f"エラーが発生しました: {str(e)}"
+
+# AIモデルによる要約関数
+def summarize_with_ai(title, description, content, model_choice):
+    prompt = f"""以下のウェブページの内容を要約してください。
+タイトル: {title}
+説明: {description}
+本文:
+{content}
+
+要約:"""
+    
+    if model_choice == "OpenAI GPT-4o-mini":
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
+    
+    elif model_choice == "Claude 3.5 Sonnet":
+        response = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.content[0].text
+    
+    elif model_choice == "Gemini 1.5 flash":
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    
+    elif model_choice == "Cohere Command-R Plus":
+        response = co.summarize(
+            text=content,
+            length='medium',
+            format='paragraph',
+            model='command-r-plus-08-2024',
+            additional_command=f"Title: {title}\nDescription: {description}"
+        )
+        return response.summary
+    
+    else:  # Groq llama-3.1-70b-versatile
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
 
 # メッセージの役割を適切に変換する関数
 def convert_role_for_api(role):
@@ -100,192 +175,111 @@ def display_html_preview(html_content):
     html_data_url = get_html_data_url(html_content)
     components.iframe(html_data_url, height=600, scrolling=True)
 
-def duckduckgo_search(prompt, max_retries=3, retry_delay=5):
-    search_type = "text"
-    keywords = prompt.strip()
+# Cohereを使用した会話機能（ストリーミング対応、新しいSDKバージョンに対応）
+def cohere_chat_stream(prompt):
+    chat_history = [
+        {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
+        for m in st.session_state.memory.chat_memory.messages
+    ]
+    response = co.chat_stream(
+        model='command-r-plus-08-2024',
+        message=prompt,
+        temperature=0.5,
+        chat_history=chat_history,
+    )
+    for event in response:
+        if event.event_type == "text-generation":
+            yield event.text
 
-    if "画像を調べて" in prompt:
-        search_type = "images"
-        keywords = prompt.replace("画像を調べて", "").strip()
-    elif "動画を調べて" in prompt:
-        search_type = "videos"
-        keywords = prompt.replace("動画を調べて", "").strip()
-    elif "最新のニュースを調べて" in prompt:
-        search_type = "news"
-        keywords = prompt.replace("最新のニュースを調べて", "").strip()
-    elif "調べて" in prompt:
-        keywords = prompt.replace("調べて", "").strip()
-    else:
-        return None, None, None, None  # 検索トリガーがない場合は検索を実行しない
+# Groqを使用した会話機能（ストリーミング対応）
+def groq_chat_stream(prompt):
+    chat_history = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt}
+    ]
+    response = groq_client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=chat_history,
+        max_tokens=5000,
+        temperature=0.5,
+        stream=True
+    )
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            yield chunk.choices[0].delta.content
 
-    if not keywords:
-        if search_type == "news":
-            keywords = "今日のトップニュース"
-        else:
-            keywords = "最新のトレンド"
-
-    for attempt in range(max_retries):
-        try:
-            with DDGS() as ddgs:
-                if search_type == "text":
-                    results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
-                elif search_type == "images":
-                    results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-                elif search_type == "videos":
-                    results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-                elif search_type == "news":
-                    results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
-                return results, search_type, None, keywords
-        except DuckDuckGoSearchException as e:
-            if "Ratelimit" in str(e) and attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                continue
-            return None, search_type, f"検索中にエラーが発生しました: {str(e)}", keywords
-        except Exception as e:
-            return None, search_type, f"予期せぬエラーが発生しました: {str(e)}", keywords
-    
-    return None, search_type, "リトライ回数を超えました。しばらく待ってから再度お試しください。", keywords
-
+# AIモデルにプロンプトを送信し、応答を生成
 def generate_response(prompt, model_choice, memory):
-    search_results, search_type, error_message, used_keywords = duckduckgo_search(prompt)
-    
+    url = detect_url(prompt)
+    if url:
+        summary = scrape_and_summarize(url, model_choice)
+        full_response = f"ウェブページの要約:\n\n{summary}\n\n元のURL: {url}"
+        yield full_response
+        memory.chat_memory.add_ai_message(full_response)
+        return
+
     full_response = ""
     chat_history = memory.chat_memory.messages
     
-    if search_results is not None:
-        # 検索プロセスと結果を表示するタブを作成
-        tab1, tab2 = st.tabs(["コード", "実行結果"])
-        
-        with tab1:
-            st.code(f"""
-                    
-
-
-keywords = "{used_keywords}"
-search_type = "{search_type}"
-
-with DDGS() as ddgs:
-    if search_type == "text":
-        results = list(ddgs.text(keywords, region="jp-jp", max_results=3))
-    elif search_type == "images":
-        results = list(ddgs.images(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-    elif search_type == "videos":
-        results = list(ddgs.videos(keywords, region="jp-jp", safesearch="moderate", max_results=3))
-    elif search_type == "news":
-        results = list(ddgs.news(keywords, region="jp-jp", max_results=3))
-
-print(results)
-            """)
-
-        with tab2:
-            if error_message:
-                st.error(f"検索エラー: {error_message}")
-            elif search_results:
-                st.success(f"検索キーワード: {used_keywords}")
-                st.json(search_results)
-            else:
-                st.warning("検索結果がありませんでした。")
-
-        if error_message:
-            full_response += f"検索エラー: {error_message}\n\n"
-        elif search_results:
-            full_response += f"DuckDuckGo検索結果 ({search_type}):\n\n"
-            for result in search_results:
-                if search_type == "text":
-                    full_response += f"- {result.get('body', 'No body')}\n  URL: {result.get('href', 'No URL')}\n\n"
-                elif search_type == "images":
-                    full_response += f"![画像]({result.get('image', 'No image')})\n  URL: {result.get('url', 'No URL')}\n\n"
-                elif search_type == "videos":
-                    full_response += f"動画: {result.get('title', 'No title')}\n  URL: {result.get('content', 'No URL')}\n\n"
-                elif search_type == "news":
-                    full_response += f"- {result.get('title', 'No title')}: {result.get('body', 'No body')}\n  URL: {result.get('url', 'No URL')}\n  日付: {result.get('date', 'No date')}\n\n"
-            
-            full_response += "\n検索結果の解釈：\n"
-
     try:
         if model_choice == "OpenAI GPT-4o-mini":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
-            if search_results:
-                messages.append({"role": "system", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
-            response = openai_client.chat.completions.create(
+            for chunk in openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                stream=False
-            )
-            full_response += response.choices[0].message.content
+                stream=True
+            ):
+                if chunk.choices[0].delta.content is not None:
+                    full_response += chunk.choices[0].delta.content
+                    yield full_response
 
         elif model_choice == "Claude 3.5 Sonnet":
             messages = [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
-            if search_results:
-                messages.append({"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             formatted_messages = format_messages_for_claude(messages)
             
-            response = anthropic_client.messages.create(
+            with anthropic_client.messages.stream(
                 model="claude-3-5-sonnet-20240620",
                 max_tokens=8000,
                 system=SYSTEM_PROMPT,
                 messages=formatted_messages
-            )
-            full_response += response.content[0].text
+            ) as stream:
+                for text in stream.text_stream:
+                    full_response += text
+                    yield full_response
 
         elif model_choice == "Gemini 1.5 flash":
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
                 {"role": convert_role_for_api(m.type), "content": m.content} for m in chat_history
             ] + [{"role": "user", "content": prompt}]
-            if search_results:
-                messages.append({"role": "system", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
             
             model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content([m["content"] for m in messages])
-            full_response += response.text
+            response = model.generate_content([m["content"] for m in messages], stream=True)
+            for chunk in response:
+                full_response += chunk.text
+                yield full_response
 
         elif model_choice == "Cohere Command-R Plus":
-            chat_history = [
-                {"role": "USER" if m.type == "human" else "CHATBOT", "message": m.content}
-                for m in st.session_state.memory.chat_memory.messages
-            ]
-            if search_results:
-                chat_history.append({"role": "CHATBOT", "message": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
-            chat_history.append({"role": "USER", "message": prompt})
-            
-            response = co.chat(
-                model='command-r-plus-08-2024',
-                message=prompt,
-                temperature=0.5,
-                chat_history=chat_history,
-            )
-            full_response += response.text
+            for chunk in cohere_chat_stream(prompt):
+                full_response += chunk
+                yield full_response
 
-        else:  # Groq llama-3.1-70b-versatile
-            chat_history = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ]
-            if search_results:
-                chat_history.insert(1, {"role": "assistant", "content": f"以下の情報を考慮して、ユーザーの質問に答えてください：\n{full_response}"})
-            
-            response = groq_client.chat.completions.create(
-                model="llama-3.1-70b-versatile",
-                messages=chat_history,
-                max_tokens=5000,
-                temperature=0.5,
-                stream=False
-            )
-            full_response += response.choices[0].message.content
+        else:  # Groq llama3-70b-8192
+            for chunk in groq_chat_stream(prompt):
+                full_response += chunk
+                yield full_response
 
         # 会話履歴に応答を追加
         memory.chat_memory.add_ai_message(full_response)
-        return full_response
 
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
-        return "申し訳ありません。エラーが発生しました。もう一度お試しください。"
+        yield "申し訳ありません。エラーが発生しました。もう一度お試しください。"
 
 # ログイン状態の確認
 def check_login_status():
@@ -305,6 +299,7 @@ def login_page():
         else:
             st.error("ユーザー名またはパスワードが間違っています。")
 
+# メイン機能の関数
 def main_app():
     st.title("YuyaGPT")
 
@@ -328,7 +323,7 @@ def main_app():
     # モデル選択のプルダウン
     model_choice = st.selectbox(
         "使用するモデルを選択してください",
-        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq llama-3.1-70b-versatile"]
+        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
     )
 
     # メインコンテンツエリアの作成
@@ -349,7 +344,10 @@ def main_app():
         with st.chat_message("ai"):
             message_placeholder = st.empty()
             try:
-                full_response = generate_response(prompt, model_choice, st.session_state.memory)
+                full_response = ""
+                for response in generate_response(prompt, model_choice, st.session_state.memory):
+                    full_response = response
+                    message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
                 
                 # HTMLコンテンツの抽出
