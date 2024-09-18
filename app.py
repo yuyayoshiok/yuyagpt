@@ -9,13 +9,10 @@ from anthropic import Anthropic
 import google.generativeai as genai
 import cohere
 from groq import Groq
-import requests
-from bs4 import BeautifulSoup
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 import hashlib
+from duckduckgo_search import DDGS
 
 # .envファイルを読み込む
 load_dotenv()
@@ -53,88 +50,6 @@ def reload_env():
     genai.configure(api_key=gemini_api_key)
     co = cohere.Client(api_key=cohere_api_key)
     groq_client = Groq(api_key=groq_api_key)
-
-# URLの検出関数
-def detect_url(text):
-    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
-    urls = url_pattern.findall(text)
-    return urls[0] if urls else None
-
-# スクレイピングと要約の関数
-def scrape_and_summarize(url, model_choice):
-    try:
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # メタデータの取得
-        title = soup.title.string if soup.title else "No title"
-        description = soup.find('meta', attrs={'name': 'description'})
-        description = description['content'] if description else "No description"
-        
-        # 本文の取得
-        paragraphs = soup.find_all('p')
-        content = ' '.join([p.text for p in paragraphs])
-        
-        # 長すぎる場合は切り詰める
-        max_content_length = 5000  # 適宜調整してください
-        if len(content) > max_content_length:
-            content = content[:max_content_length] + "..."
-        
-        # AIモデルによる要約
-        summary = summarize_with_ai(title, description, content, model_choice)
-        
-        return summary
-    except Exception as e:
-        return f"エラーが発生しました: {str(e)}"
-
-# AIモデルによる要約関数
-def summarize_with_ai(title, description, content, model_choice):
-    prompt = f"""以下のウェブページの内容を要約してください。
-タイトル: {title}
-説明: {description}
-本文:
-{content}
-
-要約:"""
-    
-    if model_choice == "OpenAI GPT-4o-mini":
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000
-        )
-        return response.choices[0].message.content
-    
-    elif model_choice == "Claude 3.5 Sonnet":
-        response = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.content[0].text
-    
-    elif model_choice == "Gemini 1.5 flash":
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text
-    
-    elif model_choice == "Cohere Command-R Plus":
-        response = co.summarize(
-            text=content,
-            length='medium',
-            format='paragraph',
-            model='command-r-plus-08-2024',
-            additional_command=f"Title: {title}\nDescription: {description}"
-        )
-        return response.summary
-    
-    else:  # Groq llama-3.1-70b-versatile
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000
-        )
-        return response.choices[0].message.content
 
 # メッセージの役割を適切に変換する関数
 def convert_role_for_api(role):
@@ -208,14 +123,126 @@ def groq_chat_stream(prompt):
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
+# DuckDuckGo検索機能
+def duckduckgo_search(prompt):
+    search_type = "text"
+    keywords = prompt
+
+    if "画像を調べて" in prompt:
+        search_type = "images"
+        keywords = prompt.replace("画像を調べて", "").strip()
+    elif "動画を調べて" in prompt:
+        search_type = "videos"
+        keywords = prompt.replace("動画を調べて", "").strip()
+    elif "最新のニュースを調べて" in prompt:
+        search_type = "news"
+        keywords = prompt.replace("最新のニュースを調べて", "").strip()
+    elif "調べて" in prompt:
+        keywords = prompt.replace("調べて", "").strip()
+
+    tab1, tab2 = st.tabs(["コード", "実行結果"])
+    
+    with tab1:
+        if search_type == "text":
+            st.code(
+                f"""
+                from duckduckgo_search import DDGS
+                results = DDGS().text("{keywords}", region="jp-jp", max_results=3)
+                print(results)
+                """
+            )
+        elif search_type == "images":
+            st.code(
+                f"""
+                from duckduckgo_search import DDGS
+                results = DDGS().images(
+                    keywords="{keywords}",
+                    region="jp-jp",
+                    safesearch="moderate",
+                    max_results=1,
+                )
+                print(results)
+                """
+            )
+        elif search_type == "videos":
+            st.code(
+                f"""
+                from duckduckgo_search import DDGS
+                results = DDGS().videos(
+                    keywords="{keywords}",
+                    region="jp-jp",
+                    safesearch="moderate",
+                    timelimit="w",
+                    resolution="high",
+                    duration="medium",
+                    max_results=1,
+                )
+                print(results)
+                """
+            )
+        elif search_type == "news":
+            st.code(
+                f"""
+                from duckduckgo_search import DDGS
+                results = DDGS().news(
+                    keywords="{keywords}",
+                    region="jp-jp",
+                    safesearch="moderate",
+                    timelimit="m",
+                    max_results=2,
+                )
+                print(results)
+                """
+            )
+
+    with tab2:
+        if st.button("Search"):
+            st.write("実行結果")
+            if search_type == "text":
+                results = DDGS().text(keywords, region="jp-jp", max_results=3)
+                st.write(results)
+            elif search_type == "images":
+                results = DDGS().images(
+                    keywords=keywords,
+                    region="jp-jp",
+                    safesearch="moderate",
+                    max_results=1,
+                )
+                st.write(results)
+                if results:
+                    st.image(results[0]["image"], caption="image")
+                    st.image(results[0]["thumbnail"], caption="thumbnail")
+            elif search_type == "videos":
+                results = DDGS().videos(
+                    keywords=keywords,
+                    region="jp-jp",
+                    safesearch="moderate",
+                    timelimit="w",
+                    resolution="high",
+                    duration="medium",
+                    max_results=1,
+                )
+                st.write(results)
+                if results:
+                    st.video(results[0]["content"])
+            elif search_type == "news":
+                results = DDGS().news(
+                    keywords=keywords,
+                    region="jp-jp",
+                    safesearch="moderate",
+                    timelimit="m",
+                    max_results=2,
+                )
+                st.write(results)
+
+    return f"DuckDuckGo検索結果: {search_type}検索 - キーワード: {keywords}"
+
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(prompt, model_choice, memory):
-    url = detect_url(prompt)
-    if url:
-        summary = scrape_and_summarize(url, model_choice)
-        full_response = f"ウェブページの要約:\n\n{summary}\n\n元のURL: {url}"
-        yield full_response
-        memory.chat_memory.add_ai_message(full_response)
+    if "調べて" in prompt:
+        search_result = duckduckgo_search(prompt)
+        yield search_result
+        memory.chat_memory.add_ai_message(search_result)
         return
 
     full_response = ""
