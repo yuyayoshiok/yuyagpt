@@ -16,6 +16,8 @@ import time
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
 import streamlit as st
+import random
+
 
 # .envファイルを読み込む
 load_dotenv()
