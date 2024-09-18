@@ -318,8 +318,7 @@ def login_page():
         else:
             st.error("ユーザー名またはパスワードが間違っています。")
 
-# メイン機能の関数
-def main_app():
+async def main_app():
     st.title("YuyaGPT")
 
     # ログアウトボタン
@@ -342,7 +341,7 @@ def main_app():
     # モデル選択のプルダウン
     model_choice = st.selectbox(
         "使用するモデルを選択してください",
-        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
+        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq llama-3.1-70b-versatile"]
     )
 
     # メインコンテンツエリアの作成
