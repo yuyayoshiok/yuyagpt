@@ -128,9 +128,9 @@ def summarize_with_ai(title, description, content, model_choice):
         )
         return response.summary
     
-    else:  # Groq llama3-70b-8192
+    else:  # Groq llama-3.1-70b-versatile
         response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.1-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000
         )
