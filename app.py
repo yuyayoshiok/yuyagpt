@@ -367,7 +367,23 @@ def login_page():
         else:
             st.error("ユーザー名またはパスワードが間違っています。")
 
-# メイン機能の関数
+def generate_response_with_timeout(prompt, model_choice, memory, timeout=60):
+    def generate():
+        try:
+            for response in generate_response(prompt, model_choice, memory):
+                yield response
+        except Exception as e:
+            st.error(f"応答生成中にエラーが発生しました: {str(e)}")
+            yield "エラーが発生しました。もう一度お試しください。"
+
+    with ThreadPoolExecutor() as executor:
+        future = executor.submit(lambda: list(generate()))
+        try:
+            result = future.result(timeout=timeout)
+            return result[-1] if result else "タイムアウトにより応答を生成できませんでした。"
+        except TimeoutError:
+            return "応答生成がタイムアウトしました。もう一度お試しください。"
+
 def main_app():
     st.title("YuyaGPT")
 
@@ -402,6 +418,10 @@ def main_app():
         with st.chat_message(message.type):
             st.markdown(message.content)
 
+    # デバッグ情報の表示
+    st.sidebar.subheader("デバッグ情報")
+    st.sidebar.write(f"セッション状態: {st.session_state}")
+
     # ユーザー入力の処理
     if prompt := st.chat_input("質問を入力してください"):
         st.session_state.memory.chat_memory.add_user_message(prompt)
@@ -412,12 +432,13 @@ def main_app():
         with st.chat_message("ai"):
             message_placeholder = st.empty()
             try:
-                full_response = ""
-                for response in generate_response(prompt, model_choice, st.session_state.memory):
-                    full_response = response
-                    message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
+                start_time = time.time()
+                full_response = generate_response_with_timeout(prompt, model_choice, st.session_state.memory)
+                end_time = time.time()
                 
+                message_placeholder.markdown(full_response)
+                st.sidebar.write(f"応答生成時間: {end_time - start_time:.2f}秒")
+
                 # HTMLコンテンツの抽出
                 html_content = extract_html_content(full_response)
                 if html_content:
