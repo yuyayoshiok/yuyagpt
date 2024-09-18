@@ -423,10 +423,6 @@ def main_app():
         with st.chat_message(message.type):
             st.markdown(message.content)
 
-    # デバッグ情報の表示
-    st.sidebar.subheader("デバッグ情報")
-    st.sidebar.write(f"セッション状態: {st.session_state}")
-
     # ユーザー入力の処理
     if prompt := st.chat_input("質問を入力してください"):
         st.session_state.memory.chat_memory.add_user_message(prompt)
