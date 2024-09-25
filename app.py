@@ -119,7 +119,7 @@ def summarize_with_ai(title, description, content, model_choice):
         return response.content[0].text
     
     elif model_choice == "Gemini 1.5 flash":
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash-002')
         response = model.generate_content(prompt)
         return response.text
     
