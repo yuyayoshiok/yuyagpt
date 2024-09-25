@@ -40,24 +40,19 @@ def reload_env():
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path, override=True)
     
-    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key, groq_api_key, openrouter_api_key
+    global openai_api_key, anthropic_api_key, gemini_api_key, cohere_api_key, groq_api_key
     openai_api_key = st.secrets["openai"]["api_key"]
     anthropic_api_key = st.secrets["anthropic"]["api_key"]
     gemini_api_key = st.secrets["gemini"]["api_key"]
     cohere_api_key = st.secrets["cohere"]["api_key"]
     groq_api_key = st.secrets["groq"]["api_key"]
-    openrouter_api_key = st.secrets["openrouter"]["api_key"]
     
-    global openai_client, anthropic_client, co, groq_client, openrouter_client
+    global openai_client, anthropic_client, co, groq_client
     openai_client = OpenAI(api_key=openai_api_key)
     anthropic_client = Anthropic(api_key=anthropic_api_key)
     genai.configure(api_key=gemini_api_key)
     co = cohere.Client(api_key=cohere_api_key)
     groq_client = Groq(api_key=groq_api_key)
-    openrouter_client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=openrouter_api_key,
-    )
 
 # URLの検出関数
 def detect_url(text):
@@ -133,21 +128,9 @@ def summarize_with_ai(title, description, content, model_choice):
         )
         return response.summary
     
-    elif model_choice == "Groq llama-3.1-70b-versatile":
+    else:  # Groq llama-3.1-70b-versatile
         response = groq_client.chat.completions.create(
             model="llama-3.1-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000
-        )
-        return response.choices[0].message.content
-    
-    elif model_choice == "DeepSeek":
-        response = openrouter_client.chat.completions.create(
-            extra_headers={
-                "HTTP-Referer": "https://yuyagpt.streamlit.app/",
-                "X-Title": "YuyaGPT",
-            },
-            model="deepseek/deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000
         )
@@ -225,27 +208,6 @@ def groq_chat_stream(prompt):
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
-# DeepSeekを使用した会話機能（ストリーミング対応）
-def deepseek_chat_stream(prompt):
-    chat_history = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt}
-    ]
-    response = openrouter_client.chat.completions.create(
-        extra_headers={
-            "HTTP-Referer": "https://yuyagpt.streamlit.app/",
-            "X-Title": "YuyaGPT",
-        },
-        model="deepseek/deepseek-chat",
-        messages=chat_history,
-        max_tokens=5000,
-        temperature=0.5,
-        stream=True
-    )
-    for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            yield chunk.choices[0].delta.content
-
 # AIモデルにプロンプトを送信し、応答を生成
 def generate_response(prompt, model_choice, memory):
     url = detect_url(prompt)
@@ -307,13 +269,8 @@ def generate_response(prompt, model_choice, memory):
                 full_response += chunk
                 yield full_response
 
-        elif model_choice == "Groq llama3-70b-8192":
+        else:  # Groq llama3-70b-8192
             for chunk in groq_chat_stream(prompt):
-                full_response += chunk
-                yield full_response
-
-        elif model_choice == "DeepSeek":
-            for chunk in deepseek_chat_stream(prompt):
                 full_response += chunk
                 yield full_response
 
@@ -366,7 +323,7 @@ def main_app():
     # モデル選択のプルダウン
     model_choice = st.selectbox(
         "使用するモデルを選択してください",
-        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq", "DeepSeek"]
+        ["OpenAI GPT-4o-mini", "Claude 3.5 Sonnet", "Gemini 1.5 flash", "Cohere Command-R Plus", "Groq"]
     )
 
     # メインコンテンツエリアの作成
